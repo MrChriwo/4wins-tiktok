@@ -1,0 +1,113 @@
+.screen {
+    flex-grow: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    padding-top: 16px;
+    padding-bottom: 16px;
+    padding-left: 16px;
+    padding-right: 16px;
+    background-color: rgba(8, 8, 12, 0.65);
+}
+
+.panel {
+    width: 100%;
+    max-width: 1080px;
+    margin-bottom: 12px;
+}
+
+.hud-panel {
+    width: auto;
+    max-width: none;
+    align-items: center;
+    justify-content: center;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+    margin-bottom: 8px;
+}
+
+.title-text {
+    font-size: 56px;
+    -unity-font-style: bold;
+    letter-spacing: 6px;
+    color: rgb(255, 210, 130);
+    -unity-text-align: middle-center;
+    -unity-text-outline-color: rgba(255, 120, 30, 0.95);
+    -unity-text-outline-width: 2px;
+}
+
+.timer-text {
+    margin-top: 6px;
+    margin-bottom: 10px;
+    font-size: 34px;
+    -unity-font-style: bold;
+    letter-spacing: 2px;
+    color: rgb(255, 190, 95);
+    -unity-text-align: middle-center;
+    -unity-text-outline-color: rgba(255, 130, 40, 0.9);
+    -unity-text-outline-width: 1px;
+}
+
+.info-row {
+    width: auto;
+    max-width: 96%;
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.info-text {
+    margin-left: 10px;
+    margin-right: 10px;
+    margin-top: 4px;
+    font-size: 20px;
+    -unity-font-style: bold;
+    color: rgb(255, 184, 92);
+    -unity-text-align: middle-center;
+    -unity-text-outline-color: rgba(200, 95, 10, 0.9);
+    -unity-text-outline-width: 1px;
+}
+
+.winner-text {
+    color: rgb(255, 224, 160);
+}
+
+.board-panel {
+    align-items: center;
+    justify-content: center;
+}
+
+.board-frame {
+    position: relative;
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: 100% 100%;
+}
+
+.board-grid {
+    position: absolute;
+}
+
+.board-cell {
+    border-top-width: 0px;
+    border-right-width: 0px;
+    border-bottom-width: 0px;
+    border-left-width: 0px;
+    border-top-left-radius: 999px;
+    border-top-right-radius: 999px;
+    border-bottom-left-radius: 999px;
+    border-bottom-right-radius: 999px;
+}
+
+.footer-panel {
+    align-items: center;
+    justify-content: center;
+}
+
+.restart-button {
+    width: 180px;
+    height: 36px;
+}

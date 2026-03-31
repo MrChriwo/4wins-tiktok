@@ -1,0 +1,20 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Style src="ConnectFourGame.uss" />
+    <ui:VisualElement class="screen">
+        <ui:VisualElement class="hud-panel">
+            <ui:Label class="title-text" text="4 Wins" />
+            <ui:Label name="timer-label" class="timer-text" text="Time: -" />
+
+            <ui:VisualElement class="info-row">
+                <ui:Label name="state-label" class="info-text" text="State: Idle" />
+                <ui:Label name="voting-label" class="info-text" text="Votes: -" />
+                <ui:Label name="status-label" class="info-text" text="Status" />
+                <ui:Label name="winner-label" class="info-text winner-text" text="" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement class="panel footer-panel">
+            <ui:Button name="restart-button" text="Restart" class="restart-button" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>
