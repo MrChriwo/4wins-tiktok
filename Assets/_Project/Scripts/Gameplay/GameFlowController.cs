@@ -34,15 +34,25 @@ namespace FourWinsTikTok.Gameplay
         public event Action<IReadOnlyList<VoteTally>> OnVoteUpdated;
         public event Action<string> OnStatusMessage;
         public event Action<PlayerSide> OnGameOver;
+        public event Action<int, int, int, int> OnRoundScoreChanged;
+        public event Action<PlayerSide, bool> OnRoundCompleted;
 
         private readonly System.Random _random = new System.Random();
         private IBotPlayer _botPlayer;
         private VoteSystem _voteSystem;
         private Coroutine _botTurnRoutine;
+        private int _currentRound = 1;
+        private int _communityWins;
+        private int _opponentWins;
+        private bool _matchOver;
 
         public BoardState CurrentBoard { get; private set; }
         public GameFlowState CurrentState { get; private set; } = GameFlowState.Idle;
         public PlayerSide ActivePlayer { get; private set; } = PlayerSide.None;
+        public int CurrentRound => _currentRound;
+        public int CommunityWins => _communityWins;
+        public int OpponentWins => _opponentWins;
+        public bool IsMatchOver => _matchOver;
 
         private void Awake()
         {
@@ -103,19 +113,53 @@ namespace FourWinsTikTok.Gameplay
 
             turnTimer.CancelCountdown();
 
-            CurrentBoard = new BoardState(gameConfig.Columns, gameConfig.Rows, gameConfig.ConnectLength);
             _voteSystem = new VoteSystem(voteRulesConfig, gameConfig.Columns);
             if (!useLocalStreamerInsteadOfBot)
             {
                 _botPlayer = new RandomBotPlayer(_random);
             }
 
+            _currentRound = 1;
+            _communityWins = 0;
+            _opponentWins = 0;
+            _matchOver = false;
+
             SetState(GameFlowState.Idle);
             ActivePlayer = PlayerSide.None;
 
-            OnBoardInitialized?.Invoke(CurrentBoard.Columns, CurrentBoard.Rows);
-            OnBoardChanged?.Invoke(CurrentBoard);
-            OnVoteUpdated?.Invoke(Array.Empty<VoteTally>());
+            InitializeBoardForRound();
+            PublishScoreState();
+
+            BeginCommunityTurn();
+        }
+
+        public void StartNextRound()
+        {
+            if (gameConfig == null)
+            {
+                return;
+            }
+
+            if (_matchOver)
+            {
+                StartNewGame();
+                return;
+            }
+
+            if (_botTurnRoutine != null)
+            {
+                StopCoroutine(_botTurnRoutine);
+                _botTurnRoutine = null;
+            }
+
+            turnTimer.CancelCountdown();
+            _currentRound++;
+
+            SetState(GameFlowState.Idle);
+            ActivePlayer = PlayerSide.None;
+
+            InitializeBoardForRound();
+            PublishScoreState();
 
             BeginCommunityTurn();
         }
@@ -141,6 +185,20 @@ namespace FourWinsTikTok.Gameplay
             }
 
             return true;
+        }
+
+        private void InitializeBoardForRound()
+        {
+            CurrentBoard = new BoardState(gameConfig.Columns, gameConfig.Rows, gameConfig.ConnectLength);
+            OnBoardInitialized?.Invoke(CurrentBoard.Columns, CurrentBoard.Rows);
+            OnBoardChanged?.Invoke(CurrentBoard);
+            OnVoteUpdated?.Invoke(Array.Empty<VoteTally>());
+            OnTimerChanged?.Invoke(0f);
+        }
+
+        private void PublishScoreState()
+        {
+            OnRoundScoreChanged?.Invoke(_currentRound, _communityWins, _opponentWins, gameConfig.MatchWinsRequired);
         }
 
         private void BeginCommunityTurn()
@@ -397,12 +455,25 @@ namespace FourWinsTikTok.Gameplay
 
             if (CurrentBoard.CheckWinFrom(column, row, side))
             {
+                if (side == PlayerSide.Community)
+                {
+                    _communityWins++;
+                }
+                else if (side == PlayerSide.Streamer || side == PlayerSide.Bot)
+                {
+                    _opponentWins++;
+                }
+
+                _matchOver = _communityWins >= gameConfig.MatchWinsRequired || _opponentWins >= gameConfig.MatchWinsRequired;
+
                 SetState(GameFlowState.GameOver);
                 ActivePlayer = PlayerSide.None;
                 OnStatusMessage?.Invoke(side == PlayerSide.Community
                     ? "Community wins!"
                     : side == PlayerSide.Streamer ? "Streamer wins!" : "Bot wins!");
                 OnGameOver?.Invoke(side);
+                PublishScoreState();
+                OnRoundCompleted?.Invoke(side, _matchOver);
                 return true;
             }
 
@@ -422,6 +493,8 @@ namespace FourWinsTikTok.Gameplay
             turnTimer.CancelCountdown();
             OnStatusMessage?.Invoke("Draw!");
             OnGameOver?.Invoke(PlayerSide.None);
+            PublishScoreState();
+            OnRoundCompleted?.Invoke(PlayerSide.None, false);
         }
 
         private void SetState(GameFlowState state)

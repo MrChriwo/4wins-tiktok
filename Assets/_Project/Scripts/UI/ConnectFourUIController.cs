@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Text;
+using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
 using FourWinsTikTok.Core;
 using FourWinsTikTok.Gameplay;
@@ -31,11 +32,17 @@ namespace FourWinsTikTok.UI
         private ConnectFourBoardView _boardView;
 
         private Label _stateLabel;
+        private Label _roundLabel;
+        private Label _chatNameLabel;
+        private Label _streamerNameLabel;
+        private Label _scoreLabel;
         private Label _timerLabel;
         private Label _votingLabel;
         private Label _statusLabel;
         private Label _winnerLabel;
-        private Button _restartButton;
+        private VisualElement _winnerPopup;
+        private Label _popupWinnerLabel;
+        private Button _nextRoundButton;
 
         private float _lastDebugScaleMultiplier;
         private Vector2 _lastDebugCellSizeOffset;
@@ -78,11 +85,16 @@ namespace FourWinsTikTok.UI
             gameFlowController.OnVoteUpdated += HandleVoteUpdated;
             gameFlowController.OnStatusMessage += HandleStatusMessage;
             gameFlowController.OnGameOver += HandleGameOver;
+            gameFlowController.OnRoundScoreChanged += HandleRoundScoreChanged;
+            gameFlowController.OnRoundCompleted += HandleRoundCompleted;
 
-            if (_restartButton != null)
+            if (_nextRoundButton != null)
             {
-                _restartButton.clicked += HandleRestartClicked;
+                _nextRoundButton.clicked += HandleNextRoundClicked;
             }
+
+            UpdateStreamerNameLabel();
+            SetWinnerPopupVisible(false);
         }
 
         private void OnDisable()
@@ -96,11 +108,13 @@ namespace FourWinsTikTok.UI
                 gameFlowController.OnVoteUpdated -= HandleVoteUpdated;
                 gameFlowController.OnStatusMessage -= HandleStatusMessage;
                 gameFlowController.OnGameOver -= HandleGameOver;
+                gameFlowController.OnRoundScoreChanged -= HandleRoundScoreChanged;
+                gameFlowController.OnRoundCompleted -= HandleRoundCompleted;
             }
 
-            if (_restartButton != null)
+            if (_nextRoundButton != null)
             {
-                _restartButton.clicked -= HandleRestartClicked;
+                _nextRoundButton.clicked -= HandleNextRoundClicked;
             }
         }
 
@@ -120,11 +134,17 @@ namespace FourWinsTikTok.UI
             }
 
             _stateLabel = root.Q<Label>("state-label");
+            _roundLabel = root.Q<Label>("round-label");
+            _chatNameLabel = root.Q<Label>("chat-name-label");
+            _streamerNameLabel = root.Q<Label>("streamer-name-label");
+            _scoreLabel = root.Q<Label>("score-label");
             _timerLabel = root.Q<Label>("timer-label");
             _votingLabel = root.Q<Label>("voting-label");
             _statusLabel = root.Q<Label>("status-label");
             _winnerLabel = root.Q<Label>("winner-label");
-            _restartButton = root.Q<Button>("restart-button");
+            _winnerPopup = root.Q<VisualElement>("winner-popup");
+            _popupWinnerLabel = root.Q<Label>("popup-winner-label");
+            _nextRoundButton = root.Q<Button>("next-round-button");
             VisualElement boardFrame = root.Q<VisualElement>("board-frame");
             VisualElement boardGrid = root.Q<VisualElement>("board-grid");
 
@@ -154,6 +174,8 @@ namespace FourWinsTikTok.UI
             {
                 _winnerLabel.text = string.Empty;
             }
+
+            SetWinnerPopupVisible(false);
         }
 
         private void HandleBoardChanged(BoardState board)
@@ -240,12 +262,72 @@ namespace FourWinsTikTok.UI
                         : "Result: Bot wins";
         }
 
-        private void HandleRestartClicked()
+        private void HandleRoundScoreChanged(int round, int communityWins, int opponentWins, int targetWins)
+        {
+            if (_roundLabel != null)
+            {
+                _roundLabel.text = $"ROUND {round}";
+            }
+
+            if (_chatNameLabel != null)
+            {
+                _chatNameLabel.text = "Chat";
+            }
+
+            if (_scoreLabel != null)
+            {
+                _scoreLabel.text = $"{communityWins} : {opponentWins}  (first to {targetWins})";
+            }
+        }
+
+        private void HandleRoundCompleted(PlayerSide winner, bool isMatchOver)
+        {
+            if (_popupWinnerLabel != null)
+            {
+                _popupWinnerLabel.text = winner == PlayerSide.None
+                    ? "Draw"
+                    : winner == PlayerSide.Community
+                        ? isMatchOver ? "Chat Wins The Match" : "Chat Wins"
+                        : winner == PlayerSide.Streamer
+                            ? isMatchOver ? "Streamer Wins The Match" : "Streamer Wins"
+                            : isMatchOver ? "Bot Wins The Match" : "Bot Wins";
+            }
+
+            if (_nextRoundButton != null)
+            {
+                _nextRoundButton.text = isMatchOver ? "New Match" : "Next Round";
+            }
+
+            SetWinnerPopupVisible(true);
+        }
+
+        private void HandleNextRoundClicked()
         {
             if (gameFlowController != null)
             {
-                gameFlowController.StartNewGame();
+                gameFlowController.StartNextRound();
             }
+
+            SetWinnerPopupVisible(false);
+        }
+
+        private void SetWinnerPopupVisible(bool visible)
+        {
+            if (_winnerPopup != null)
+            {
+                _winnerPopup.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        private void UpdateStreamerNameLabel()
+        {
+            if (_streamerNameLabel == null)
+            {
+                return;
+            }
+
+            string streamerName = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
+            _streamerNameLabel.text = string.IsNullOrWhiteSpace(streamerName) ? "Streamer" : streamerName;
         }
 
         private bool HasRuntimeLayoutChanged()

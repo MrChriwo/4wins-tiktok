@@ -8,8 +8,6 @@ namespace FourWinsTikTok.Bootstrap
 {
     public class StartScreenController : MonoBehaviour
     {
-        private const string StreamerUsernameKey = "4wins.streamer.username";
-
         [Header("References")]
         [SerializeField] private UIDocument uiDocument;
         [SerializeField] private TikTokLiveChatAdapter tikTokAdapter;
@@ -72,7 +70,7 @@ namespace FourWinsTikTok.Bootstrap
                 return;
             }
 
-            _savedUsername = PlayerPrefs.GetString(StreamerUsernameKey, string.Empty).Trim();
+            _savedUsername = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
 
             _startButton.clicked += HandleStartClicked;
             _settingsButton.clicked += HandleSettingsClicked;
@@ -163,7 +161,7 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             _savedUsername = username;
-            PlayerPrefs.SetString(StreamerUsernameKey, _savedUsername);
+            PlayerPrefs.SetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, _savedUsername);
             PlayerPrefs.Save();
 
             ApplySavedUsernameToUi();

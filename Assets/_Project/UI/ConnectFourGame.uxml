@@ -2,7 +2,14 @@
     <ui:Style src="ConnectFourGame.uss" />
     <ui:VisualElement class="screen">
         <ui:VisualElement class="hud-panel">
-            <ui:Label class="title-text" text="4 Wins" />
+            <ui:Label name="round-label" class="round-text" text="ROUND 1" />
+
+            <ui:VisualElement class="name-row">
+                <ui:Label name="chat-name-label" class="name-text left" text="Chat" />
+                <ui:Label name="streamer-name-label" class="name-text right" text="Streamer" />
+            </ui:VisualElement>
+
+            <ui:Label name="score-label" class="score-text" text="0 : 0" />
             <ui:Label name="timer-label" class="timer-text" text="Time: -" />
 
             <ui:VisualElement class="info-row">
@@ -13,8 +20,11 @@
             </ui:VisualElement>
         </ui:VisualElement>
 
-        <ui:VisualElement class="panel footer-panel">
-            <ui:Button name="restart-button" text="Restart" class="restart-button" />
+        <ui:VisualElement name="winner-popup" class="popup-overlay">
+            <ui:VisualElement class="popup-card">
+                <ui:Label name="popup-winner-label" class="popup-title" text="Community Wins" />
+                <ui:Button name="next-round-button" class="next-round-button" text="Next Round" />
+            </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>
 </ui:UXML>
