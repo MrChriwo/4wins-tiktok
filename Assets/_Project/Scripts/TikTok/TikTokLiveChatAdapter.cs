@@ -3,6 +3,7 @@ using System.Collections;
 using FourWinsTikTok.Config;
 using TikTokLiveSharp.Client;
 using TikTokLiveSharp.Events;
+using TikTokLiveSharp.Events.Objects;
 using TikTokLiveUnity;
 using UnityEngine;
 
@@ -15,6 +16,7 @@ namespace FourWinsTikTok.TikTok
         [SerializeField] private bool logConnectionEvents = true;
 
         public event Action<ChatMessage> OnChatMessageReceived;
+        public event Action<GiftMessage> OnGiftReceived;
         public event Action<bool, string> OnConnectionStateChanged;
 
         private TikTokLiveManager Manager => TikTokLiveManager.Instance;
@@ -77,6 +79,9 @@ namespace FourWinsTikTok.TikTok
             _boundManager.OnDisconnected -= HandleDisconnected;
             _boundManager.OnDisconnected += HandleDisconnected;
 
+            _boundManager.OnGift -= HandleGift;
+            _boundManager.OnGift += HandleGift;
+
             _subscribed = true;
 
             if (logConnectionEvents)
@@ -95,6 +100,7 @@ namespace FourWinsTikTok.TikTok
             _boundManager.OnChatMessage -= HandleChatMessage;
             _boundManager.OnConnected -= HandleConnected;
             _boundManager.OnDisconnected -= HandleDisconnected;
+            _boundManager.OnGift -= HandleGift;
             _subscribed = false;
             _boundManager = null;
         }
@@ -255,6 +261,27 @@ namespace FourWinsTikTok.TikTok
             }
 
             OnChatMessageReceived?.Invoke(new ChatMessage(userId, message));
+        }
+
+        private void HandleGift(TikTokLiveClient sender, TikTokGift gift)
+        {
+            if (gift == null || gift.Sender == null || gift.Gift == null)
+            {
+                return;
+            }
+
+            string userId = gift.Sender.UniqueId;
+            string giftName = gift.Gift.Name;
+            if (string.IsNullOrWhiteSpace(userId) || string.IsNullOrWhiteSpace(giftName))
+            {
+                return;
+            }
+
+            OnGiftReceived?.Invoke(new GiftMessage(
+                userId,
+                gift.Sender.UniqueId,
+                giftName.Trim(),
+                gift.Sender.AvatarThumbnail));
         }
 
         private static string NormalizeHostId(string hostId)

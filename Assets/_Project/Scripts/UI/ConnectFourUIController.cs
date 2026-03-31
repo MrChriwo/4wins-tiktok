@@ -5,7 +5,9 @@ using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
 using FourWinsTikTok.Core;
 using FourWinsTikTok.Gameplay;
+using FourWinsTikTok.TikTok;
 using FourWinsTikTok.Voting;
+using TikTokLiveUnity;
 using UnityEngine;
 using UnityEngine.UIElements;
 #if UNITY_EDITOR
@@ -42,9 +44,11 @@ namespace FourWinsTikTok.UI
         private Label _votingLabel;
         private Label _statusLabel;
         private Label _winnerLabel;
+        private ScrollView _participantsScroll;
         private VisualElement _winnerPopup;
         private Label _popupWinnerLabel;
         private Button _nextRoundButton;
+        private ParticipantRegistryService _participantRegistry;
 
         private float _lastDebugScaleMultiplier;
         private Vector2 _lastDebugCellSizeOffset;
@@ -97,6 +101,11 @@ namespace FourWinsTikTok.UI
                 _nextRoundButton.clicked += HandleNextRoundClicked;
             }
 
+            _participantRegistry = ParticipantRegistryService.EnsureInstance();
+            _participantRegistry.OnParticipantRegistered += HandleParticipantRegistered;
+            _participantRegistry.OnCleared += HandleParticipantsCleared;
+            RebuildParticipantList();
+
             UpdateStreamerNameLabel();
             SetWinnerPopupVisible(false);
         }
@@ -119,6 +128,12 @@ namespace FourWinsTikTok.UI
             if (_nextRoundButton != null)
             {
                 _nextRoundButton.clicked -= HandleNextRoundClicked;
+            }
+
+            if (_participantRegistry != null)
+            {
+                _participantRegistry.OnParticipantRegistered -= HandleParticipantRegistered;
+                _participantRegistry.OnCleared -= HandleParticipantsCleared;
             }
         }
 
@@ -147,6 +162,7 @@ namespace FourWinsTikTok.UI
             _votingLabel = root.Q<Label>("voting-label");
             _statusLabel = root.Q<Label>("status-label");
             _winnerLabel = root.Q<Label>("winner-label");
+            _participantsScroll = root.Q<ScrollView>("participants-scroll");
             _winnerPopup = root.Q<VisualElement>("winner-popup");
             _popupWinnerLabel = root.Q<Label>("popup-winner-label");
             _nextRoundButton = root.Q<Button>("next-round-button");
@@ -357,6 +373,74 @@ namespace FourWinsTikTok.UI
             }
 
             SetWinnerPopupVisible(false);
+        }
+
+        private void RebuildParticipantList()
+        {
+            if (_participantsScroll == null)
+            {
+                return;
+            }
+
+            _participantsScroll.contentContainer.Clear();
+            if (_participantRegistry == null)
+            {
+                return;
+            }
+
+            foreach (ParticipantInfo participant in _participantRegistry.Participants)
+            {
+                AddParticipantRow(participant);
+            }
+        }
+
+        private void HandleParticipantsCleared()
+        {
+            if (_participantsScroll == null)
+            {
+                return;
+            }
+
+            _participantsScroll.contentContainer.Clear();
+        }
+
+        private void HandleParticipantRegistered(ParticipantInfo participant)
+        {
+            AddParticipantRow(participant);
+        }
+
+        private void AddParticipantRow(ParticipantInfo participant)
+        {
+            if (_participantsScroll == null || participant == null)
+            {
+                return;
+            }
+
+            VisualElement row = new VisualElement();
+            row.AddToClassList("participant-row");
+
+            VisualElement avatar = new VisualElement();
+            avatar.AddToClassList("participant-avatar");
+            row.Add(avatar);
+
+            Label nameLabel = new Label(participant.DisplayName);
+            nameLabel.AddToClassList("participant-name");
+            row.Add(nameLabel);
+
+            _participantsScroll.Add(row);
+
+            if (participant.AvatarPicture == null || TikTokLiveManager.Instance == null)
+            {
+                return;
+            }
+
+            TikTokLiveManager.Instance.RequestSprite(participant.AvatarPicture, sprite =>
+            {
+                if (sprite != null)
+                {
+                    avatar.style.backgroundImage = new StyleBackground(sprite);
+                }
+            });
         }
 
         private void SetWinnerPopupVisible(bool visible)

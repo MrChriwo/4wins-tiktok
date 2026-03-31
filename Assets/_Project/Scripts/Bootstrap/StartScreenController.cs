@@ -13,7 +13,7 @@ namespace FourWinsTikTok.Bootstrap
         [SerializeField] private TikTokLiveChatAdapter tikTokAdapter;
 
         [Header("Flow")]
-        [SerializeField] private string gameSceneName = "Game";
+        [SerializeField] private string registrationSceneName = "Registration";
         [SerializeField] private bool loadAdditively = false;
         [SerializeField] private float connectTimeoutSeconds = 25f;
         [SerializeField] private bool requireTikTokConnection = true;
@@ -27,6 +27,8 @@ namespace FourWinsTikTok.Bootstrap
         private VisualElement _settingsModal;
         private TextField _settingsUsernameField;
         private IntegerField _settingsRoundsField;
+        private TextField _settingsGiftNameField;
+        private IntegerField _settingsRegistrationSecondsField;
         private Label _settingsHintLabel;
         private Button _settingsSaveButton;
         private Button _settingsCancelButton;
@@ -36,6 +38,8 @@ namespace FourWinsTikTok.Bootstrap
         private bool _isLaunching;
         private string _savedUsername = string.Empty;
         private int _savedMatchWinsToWin = 5;
+        private string _savedRegistrationGiftName = "Rose";
+        private int _savedRegistrationSeconds = 20;
 
         private void OnEnable()
         {
@@ -63,6 +67,8 @@ namespace FourWinsTikTok.Bootstrap
             _settingsModal = root.Q<VisualElement>("settings-modal");
             _settingsUsernameField = root.Q<TextField>("settings-username-field");
             _settingsRoundsField = root.Q<IntegerField>("settings-rounds-field");
+            _settingsGiftNameField = root.Q<TextField>("settings-gift-field");
+            _settingsRegistrationSecondsField = root.Q<IntegerField>("settings-registration-seconds-field");
             _settingsHintLabel = root.Q<Label>("settings-hint-label");
             _settingsSaveButton = root.Q<Button>("settings-save-button");
             _settingsCancelButton = root.Q<Button>("settings-cancel-button");
@@ -75,6 +81,8 @@ namespace FourWinsTikTok.Bootstrap
 
             _savedUsername = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
             _savedMatchWinsToWin = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.MatchWinsToWinPlayerPrefsKey, 5), 1, 25);
+            _savedRegistrationGiftName = PlayerPrefs.GetString(BootstrapKeys.RegistrationGiftNamePlayerPrefsKey, "Rose").Trim();
+            _savedRegistrationSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.RegistrationDurationSecondsPlayerPrefsKey, 20), 5, 600);
 
             _startButton.clicked += HandleStartClicked;
             _settingsButton.clicked += HandleSettingsClicked;
@@ -96,7 +104,8 @@ namespace FourWinsTikTok.Bootstrap
         {
             if (_startButton == null || _settingsButton == null || _statusLabel == null || _progressBar == null ||
                 _usernameInfoLabel == null || _settingsModal == null || _settingsUsernameField == null ||
-                _settingsRoundsField == null || _settingsHintLabel == null || _settingsSaveButton == null || _settingsCancelButton == null)
+                _settingsRoundsField == null || _settingsGiftNameField == null || _settingsRegistrationSecondsField == null ||
+                _settingsHintLabel == null || _settingsSaveButton == null || _settingsCancelButton == null)
             {
                 Debug.LogError("StartScreenController: Missing required UI elements in StartScreen UXML.");
                 return false;
@@ -153,6 +162,8 @@ namespace FourWinsTikTok.Bootstrap
         {
             _settingsUsernameField.value = _savedUsername;
             _settingsRoundsField.value = _savedMatchWinsToWin;
+            _settingsGiftNameField.value = _savedRegistrationGiftName;
+            _settingsRegistrationSecondsField.value = _savedRegistrationSeconds;
             SetSettingsModalVisible(true, string.Empty);
         }
 
@@ -166,11 +177,23 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             int roundsToWin = Mathf.Clamp(_settingsRoundsField.value, 1, 25);
+            string registrationGiftName = _settingsGiftNameField.value?.Trim();
+            int registrationSeconds = Mathf.Clamp(_settingsRegistrationSecondsField.value, 5, 600);
+
+            if (string.IsNullOrWhiteSpace(registrationGiftName))
+            {
+                SetSettingsModalVisible(true, "Registration gift cannot be empty.");
+                return;
+            }
 
             _savedUsername = username;
             _savedMatchWinsToWin = roundsToWin;
+            _savedRegistrationGiftName = registrationGiftName;
+            _savedRegistrationSeconds = registrationSeconds;
             PlayerPrefs.SetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, _savedUsername);
             PlayerPrefs.SetInt(BootstrapKeys.MatchWinsToWinPlayerPrefsKey, _savedMatchWinsToWin);
+            PlayerPrefs.SetString(BootstrapKeys.RegistrationGiftNamePlayerPrefsKey, _savedRegistrationGiftName);
+            PlayerPrefs.SetInt(BootstrapKeys.RegistrationDurationSecondsPlayerPrefsKey, _savedRegistrationSeconds);
             PlayerPrefs.Save();
 
             ApplySavedUsernameToUi();
@@ -192,12 +215,12 @@ namespace FourWinsTikTok.Bootstrap
             _progressBar.value = 0f;
 
             AsyncOperation loadOperation = loadAdditively
-                ? SceneManager.LoadSceneAsync(gameSceneName, LoadSceneMode.Additive)
-                : SceneManager.LoadSceneAsync(gameSceneName, LoadSceneMode.Single);
+                ? SceneManager.LoadSceneAsync(registrationSceneName, LoadSceneMode.Additive)
+                : SceneManager.LoadSceneAsync(registrationSceneName, LoadSceneMode.Single);
 
             if (loadOperation == null)
             {
-                _statusLabel.text = $"Failed to load scene '{gameSceneName}'.";
+                _statusLabel.text = $"Failed to load scene '{registrationSceneName}'.";
                 SetInteractable(true);
                 _isLaunching = false;
                 yield break;
@@ -291,17 +314,19 @@ namespace FourWinsTikTok.Bootstrap
             _settingsCancelButton.SetEnabled(interactable);
             _settingsUsernameField.SetEnabled(interactable);
             _settingsRoundsField.SetEnabled(interactable);
+            _settingsGiftNameField.SetEnabled(interactable);
+            _settingsRegistrationSecondsField.SetEnabled(interactable);
         }
 
         private void ApplySavedUsernameToUi()
         {
             if (string.IsNullOrWhiteSpace(_savedUsername))
             {
-                _usernameInfoLabel.text = $"No username set. Open settings.\nFirst to: {_savedMatchWinsToWin}";
+                _usernameInfoLabel.text = $"No username set. Open settings.\nFirst to: {_savedMatchWinsToWin} | Gift: {_savedRegistrationGiftName} | Reg: {_savedRegistrationSeconds}s";
                 return;
             }
 
-            _usernameInfoLabel.text = $"Streamer: {_savedUsername}\nFirst to: {_savedMatchWinsToWin}";
+            _usernameInfoLabel.text = $"Streamer: {_savedUsername}\nFirst to: {_savedMatchWinsToWin} | Gift: {_savedRegistrationGiftName} | Reg: {_savedRegistrationSeconds}s";
         }
 
         private void SetSettingsModalVisible(bool visible, string hint)

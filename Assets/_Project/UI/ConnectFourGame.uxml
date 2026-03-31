@@ -1,30 +1,37 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
     <ui:Style src="ConnectFourGame.uss" />
     <ui:VisualElement class="screen">
-        <ui:VisualElement class="hud-panel">
-            <ui:Label name="round-label" class="round-text" text="ROUND 1" />
+        <ui:VisualElement class="content-row">
+            <ui:VisualElement class="hud-panel">
+                <ui:Label name="round-label" class="round-text" text="ROUND 1" />
 
-            <ui:VisualElement class="score-columns">
-                <ui:VisualElement class="score-column left">
-                    <ui:Label name="chat-name-label" class="name-text" text="Chat" />
-                    <ui:Label name="chat-score-label" class="score-value-text" text="0" />
+                <ui:VisualElement class="score-columns">
+                    <ui:VisualElement class="score-column left">
+                        <ui:Label name="chat-name-label" class="name-text" text="Chat" />
+                        <ui:Label name="chat-score-label" class="score-value-text" text="0" />
+                    </ui:VisualElement>
+
+                    <ui:VisualElement class="score-column center">
+                        <ui:Label name="timer-label" class="timer-inline-text" text="" />
+                    </ui:VisualElement>
+
+                    <ui:VisualElement class="score-column right">
+                        <ui:Label name="streamer-name-label" class="name-text" text="Streamer" />
+                        <ui:Label name="streamer-score-label" class="score-value-text" text="0" />
+                    </ui:VisualElement>
                 </ui:VisualElement>
 
-                <ui:VisualElement class="score-column center">
-                    <ui:Label name="timer-label" class="timer-inline-text" text="" />
-                </ui:VisualElement>
-
-                <ui:VisualElement class="score-column right">
-                    <ui:Label name="streamer-name-label" class="name-text" text="Streamer" />
-                    <ui:Label name="streamer-score-label" class="score-value-text" text="0" />
+                <ui:VisualElement class="info-row">
+                    <ui:Label name="voting-label" class="info-text" text="Votes: -" />
+                    <ui:Label name="status-label" class="info-text" text="Status" />
+                    <ui:Label name="winner-label" class="info-text winner-text" text="" />
                 </ui:VisualElement>
             </ui:VisualElement>
+        </ui:VisualElement>
 
-            <ui:VisualElement class="info-row">
-                <ui:Label name="voting-label" class="info-text" text="Votes: -" />
-                <ui:Label name="status-label" class="info-text" text="Status" />
-                <ui:Label name="winner-label" class="info-text winner-text" text="" />
-            </ui:VisualElement>
+        <ui:VisualElement class="participants-panel">
+            <ui:Label class="participants-title" text="Participants" />
+            <ui:ScrollView name="participants-scroll" class="participants-scroll" />
         </ui:VisualElement>
 
         <ui:VisualElement name="winner-popup" class="popup-overlay">

@@ -1,0 +1,12 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Style src="RegistrationScreen.uss" />
+
+    <ui:VisualElement class="root">
+        <ui:Label class="title" text="Registration" />
+        <ui:Label name="gift-label" class="gift-label" text="Send gift to register" />
+        <ui:Label name="timer-label" class="timer-label" text="20" />
+        <ui:Label name="status-label" class="status-label" text="Waiting for participants..." />
+
+        <ui:ScrollView name="participants-scroll" class="participants-scroll" />
+    </ui:VisualElement>
+</ui:UXML>

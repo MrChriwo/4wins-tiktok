@@ -41,6 +41,7 @@ namespace FourWinsTikTok.Gameplay
         private readonly System.Random _random = new System.Random();
         private IBotPlayer _botPlayer;
         private VoteSystem _voteSystem;
+        private ParticipantRegistryService _participantRegistry;
         private Coroutine _botTurnRoutine;
         private int _currentRound = 1;
         private int _communityWins;
@@ -117,6 +118,7 @@ namespace FourWinsTikTok.Gameplay
             turnTimer.CancelCountdown();
 
             _voteSystem = new VoteSystem(voteRulesConfig, gameConfig.Columns);
+            _participantRegistry = ParticipantRegistryService.EnsureInstance();
             if (!useLocalStreamerInsteadOfBot)
             {
                 _botPlayer = new RandomBotPlayer(_random);
@@ -255,6 +257,16 @@ namespace FourWinsTikTok.Gameplay
                 if (logVoteFlow)
                 {
                     Debug.Log("GameFlowController: Vote ignored because community vote phase is not active.");
+                }
+
+                return;
+            }
+
+            if (_participantRegistry != null && !_participantRegistry.IsRegistered(chatMessage.UserId))
+            {
+                if (logVoteFlow)
+                {
+                    Debug.Log($"GameFlowController: Vote ignored because user '{chatMessage.UserId}' is not registered.");
                 }
 
                 return;
