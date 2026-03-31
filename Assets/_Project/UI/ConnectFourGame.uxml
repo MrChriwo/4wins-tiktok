@@ -4,16 +4,23 @@
         <ui:VisualElement class="hud-panel">
             <ui:Label name="round-label" class="round-text" text="ROUND 1" />
 
-            <ui:VisualElement class="name-row">
-                <ui:Label name="chat-name-label" class="name-text left" text="Chat" />
-                <ui:Label name="streamer-name-label" class="name-text right" text="Streamer" />
+            <ui:VisualElement class="score-columns">
+                <ui:VisualElement class="score-column left">
+                    <ui:Label name="chat-name-label" class="name-text" text="Chat" />
+                    <ui:Label name="chat-score-label" class="score-value-text" text="0" />
+                </ui:VisualElement>
+
+                <ui:VisualElement class="score-column center">
+                    <ui:Label name="timer-label" class="timer-inline-text" text="" />
+                </ui:VisualElement>
+
+                <ui:VisualElement class="score-column right">
+                    <ui:Label name="streamer-name-label" class="name-text" text="Streamer" />
+                    <ui:Label name="streamer-score-label" class="score-value-text" text="0" />
+                </ui:VisualElement>
             </ui:VisualElement>
 
-            <ui:Label name="score-label" class="score-text" text="0 : 0" />
-            <ui:Label name="timer-label" class="timer-text" text="Time: -" />
-
             <ui:VisualElement class="info-row">
-                <ui:Label name="state-label" class="info-text" text="State: Idle" />
                 <ui:Label name="voting-label" class="info-text" text="Votes: -" />
                 <ui:Label name="status-label" class="info-text" text="Status" />
                 <ui:Label name="winner-label" class="info-text winner-text" text="" />

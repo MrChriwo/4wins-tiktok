@@ -23,6 +23,7 @@
                 <ui:Label class="modal-subtitle" text="Set TikTok streamer username" />
 
                 <ui:TextField name="settings-username-field" label="Username" value="" class="settings-input" />
+                <ui:IntegerField name="settings-rounds-field" label="Rounds to Win" value="5" class="settings-input" />
                 <ui:Label name="settings-hint-label" class="settings-hint" text="" />
 
                 <ui:VisualElement class="modal-button-row">

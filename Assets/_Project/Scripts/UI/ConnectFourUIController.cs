@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using FourWinsTikTok.Bootstrap;
@@ -35,7 +36,8 @@ namespace FourWinsTikTok.UI
         private Label _roundLabel;
         private Label _chatNameLabel;
         private Label _streamerNameLabel;
-        private Label _scoreLabel;
+        private Label _chatScoreLabel;
+        private Label _streamerScoreLabel;
         private Label _timerLabel;
         private Label _votingLabel;
         private Label _statusLabel;
@@ -49,6 +51,8 @@ namespace FourWinsTikTok.UI
         private Vector2 _lastDebugSpacingOffset;
         private Vector4 _lastDebugInsetsOffset;
         private float _lastDebugDiscSizeOffset;
+        private int _lastCommunityWins = -1;
+        private int _lastOpponentWins = -1;
 
         private void Update()
         {
@@ -137,7 +141,8 @@ namespace FourWinsTikTok.UI
             _roundLabel = root.Q<Label>("round-label");
             _chatNameLabel = root.Q<Label>("chat-name-label");
             _streamerNameLabel = root.Q<Label>("streamer-name-label");
-            _scoreLabel = root.Q<Label>("score-label");
+            _chatScoreLabel = root.Q<Label>("chat-score-label");
+            _streamerScoreLabel = root.Q<Label>("streamer-score-label");
             _timerLabel = root.Q<Label>("timer-label");
             _votingLabel = root.Q<Label>("voting-label");
             _statusLabel = root.Q<Label>("status-label");
@@ -195,7 +200,7 @@ namespace FourWinsTikTok.UI
 
             if (state != GameFlowState.WaitingForCommunityVote && _timerLabel != null)
             {
-                _timerLabel.text = "Time: -";
+                _timerLabel.text = string.Empty;
             }
         }
 
@@ -203,7 +208,7 @@ namespace FourWinsTikTok.UI
         {
             if (_timerLabel != null)
             {
-                _timerLabel.text = $"Time: {remainingSeconds:0.0}s";
+                _timerLabel.text = $"{remainingSeconds:0.0}";
             }
         }
 
@@ -264,6 +269,9 @@ namespace FourWinsTikTok.UI
 
         private void HandleRoundScoreChanged(int round, int communityWins, int opponentWins, int targetWins)
         {
+            bool communityIncreased = _lastCommunityWins >= 0 && communityWins > _lastCommunityWins;
+            bool opponentIncreased = _lastOpponentWins >= 0 && opponentWins > _lastOpponentWins;
+
             if (_roundLabel != null)
             {
                 _roundLabel.text = $"ROUND {round}";
@@ -274,14 +282,54 @@ namespace FourWinsTikTok.UI
                 _chatNameLabel.text = "Chat";
             }
 
-            if (_scoreLabel != null)
+            if (_chatScoreLabel != null)
             {
-                _scoreLabel.text = $"{communityWins} : {opponentWins}  (first to {targetWins})";
+                _chatScoreLabel.text = communityWins.ToString();
             }
+
+            if (_streamerScoreLabel != null)
+            {
+                _streamerScoreLabel.text = opponentWins.ToString();
+            }
+
+            if (_statusLabel != null)
+            {
+                _statusLabel.text = $"First to {targetWins}";
+            }
+
+            if (communityIncreased)
+            {
+                StartCoroutine(PulseScoreLabel(_chatScoreLabel));
+            }
+
+            if (opponentIncreased)
+            {
+                StartCoroutine(PulseScoreLabel(_streamerScoreLabel));
+            }
+
+            _lastCommunityWins = communityWins;
+            _lastOpponentWins = opponentWins;
+        }
+
+        private IEnumerator PulseScoreLabel(Label label)
+        {
+            if (label == null)
+            {
+                yield break;
+            }
+
+            label.RemoveFromClassList("score-win-pulse");
+            yield return null;
+            label.AddToClassList("score-win-pulse");
+            yield return new WaitForSeconds(0.38f);
+            label.RemoveFromClassList("score-win-pulse");
         }
 
         private void HandleRoundCompleted(PlayerSide winner, bool isMatchOver)
         {
+            string streamerName = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
+            string opponentName = string.IsNullOrWhiteSpace(streamerName) ? "Streamer" : streamerName;
+
             if (_popupWinnerLabel != null)
             {
                 _popupWinnerLabel.text = winner == PlayerSide.None
@@ -289,7 +337,7 @@ namespace FourWinsTikTok.UI
                     : winner == PlayerSide.Community
                         ? isMatchOver ? "Chat Wins The Match" : "Chat Wins"
                         : winner == PlayerSide.Streamer
-                            ? isMatchOver ? "Streamer Wins The Match" : "Streamer Wins"
+                            ? isMatchOver ? $"{opponentName} Wins The Match" : $"{opponentName} Wins"
                             : isMatchOver ? "Bot Wins The Match" : "Bot Wins";
             }
 

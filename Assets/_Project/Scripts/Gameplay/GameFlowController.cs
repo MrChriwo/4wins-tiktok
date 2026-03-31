@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using FourWinsTikTok.AI;
+using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
 using FourWinsTikTok.Core;
 using FourWinsTikTok.TikTok;
@@ -45,6 +46,7 @@ namespace FourWinsTikTok.Gameplay
         private int _communityWins;
         private int _opponentWins;
         private bool _matchOver;
+        private int _matchWinsRequired = 5;
 
         public BoardState CurrentBoard { get; private set; }
         public GameFlowState CurrentState { get; private set; } = GameFlowState.Idle;
@@ -53,6 +55,7 @@ namespace FourWinsTikTok.Gameplay
         public int CommunityWins => _communityWins;
         public int OpponentWins => _opponentWins;
         public bool IsMatchOver => _matchOver;
+        public int MatchWinsRequired => _matchWinsRequired;
 
         private void Awake()
         {
@@ -118,6 +121,11 @@ namespace FourWinsTikTok.Gameplay
             {
                 _botPlayer = new RandomBotPlayer(_random);
             }
+
+            _matchWinsRequired = Mathf.Clamp(
+                PlayerPrefs.GetInt(BootstrapKeys.MatchWinsToWinPlayerPrefsKey, gameConfig.MatchWinsRequired),
+                1,
+                25);
 
             _currentRound = 1;
             _communityWins = 0;
@@ -198,7 +206,7 @@ namespace FourWinsTikTok.Gameplay
 
         private void PublishScoreState()
         {
-            OnRoundScoreChanged?.Invoke(_currentRound, _communityWins, _opponentWins, gameConfig.MatchWinsRequired);
+            OnRoundScoreChanged?.Invoke(_currentRound, _communityWins, _opponentWins, _matchWinsRequired);
         }
 
         private void BeginCommunityTurn()
@@ -464,7 +472,7 @@ namespace FourWinsTikTok.Gameplay
                     _opponentWins++;
                 }
 
-                _matchOver = _communityWins >= gameConfig.MatchWinsRequired || _opponentWins >= gameConfig.MatchWinsRequired;
+                _matchOver = _communityWins >= _matchWinsRequired || _opponentWins >= _matchWinsRequired;
 
                 SetState(GameFlowState.GameOver);
                 ActivePlayer = PlayerSide.None;

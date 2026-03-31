@@ -26,6 +26,7 @@ namespace FourWinsTikTok.Bootstrap
 
         private VisualElement _settingsModal;
         private TextField _settingsUsernameField;
+        private IntegerField _settingsRoundsField;
         private Label _settingsHintLabel;
         private Button _settingsSaveButton;
         private Button _settingsCancelButton;
@@ -34,6 +35,7 @@ namespace FourWinsTikTok.Bootstrap
         private string _connectedTarget = string.Empty;
         private bool _isLaunching;
         private string _savedUsername = string.Empty;
+        private int _savedMatchWinsToWin = 5;
 
         private void OnEnable()
         {
@@ -60,6 +62,7 @@ namespace FourWinsTikTok.Bootstrap
 
             _settingsModal = root.Q<VisualElement>("settings-modal");
             _settingsUsernameField = root.Q<TextField>("settings-username-field");
+            _settingsRoundsField = root.Q<IntegerField>("settings-rounds-field");
             _settingsHintLabel = root.Q<Label>("settings-hint-label");
             _settingsSaveButton = root.Q<Button>("settings-save-button");
             _settingsCancelButton = root.Q<Button>("settings-cancel-button");
@@ -71,6 +74,7 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             _savedUsername = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
+            _savedMatchWinsToWin = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.MatchWinsToWinPlayerPrefsKey, 5), 1, 25);
 
             _startButton.clicked += HandleStartClicked;
             _settingsButton.clicked += HandleSettingsClicked;
@@ -92,7 +96,7 @@ namespace FourWinsTikTok.Bootstrap
         {
             if (_startButton == null || _settingsButton == null || _statusLabel == null || _progressBar == null ||
                 _usernameInfoLabel == null || _settingsModal == null || _settingsUsernameField == null ||
-                _settingsHintLabel == null || _settingsSaveButton == null || _settingsCancelButton == null)
+                _settingsRoundsField == null || _settingsHintLabel == null || _settingsSaveButton == null || _settingsCancelButton == null)
             {
                 Debug.LogError("StartScreenController: Missing required UI elements in StartScreen UXML.");
                 return false;
@@ -148,6 +152,7 @@ namespace FourWinsTikTok.Bootstrap
         private void HandleSettingsClicked()
         {
             _settingsUsernameField.value = _savedUsername;
+            _settingsRoundsField.value = _savedMatchWinsToWin;
             SetSettingsModalVisible(true, string.Empty);
         }
 
@@ -160,13 +165,17 @@ namespace FourWinsTikTok.Bootstrap
                 return;
             }
 
+            int roundsToWin = Mathf.Clamp(_settingsRoundsField.value, 1, 25);
+
             _savedUsername = username;
+            _savedMatchWinsToWin = roundsToWin;
             PlayerPrefs.SetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, _savedUsername);
+            PlayerPrefs.SetInt(BootstrapKeys.MatchWinsToWinPlayerPrefsKey, _savedMatchWinsToWin);
             PlayerPrefs.Save();
 
             ApplySavedUsernameToUi();
             SetSettingsModalVisible(false, string.Empty);
-            _statusLabel.text = $"Username saved: {_savedUsername}";
+            _statusLabel.text = $"Settings saved: {_savedUsername}, first to {_savedMatchWinsToWin}.";
         }
 
         private void HandleSettingsCancelClicked()
@@ -281,13 +290,18 @@ namespace FourWinsTikTok.Bootstrap
             _settingsSaveButton.SetEnabled(interactable);
             _settingsCancelButton.SetEnabled(interactable);
             _settingsUsernameField.SetEnabled(interactable);
+            _settingsRoundsField.SetEnabled(interactable);
         }
 
         private void ApplySavedUsernameToUi()
         {
-            _usernameInfoLabel.text = string.IsNullOrWhiteSpace(_savedUsername)
-                ? "No username set. Open settings."
-                : $"Configured streamer: {_savedUsername}";
+            if (string.IsNullOrWhiteSpace(_savedUsername))
+            {
+                _usernameInfoLabel.text = $"No username set. Open settings.\nFirst to: {_savedMatchWinsToWin}";
+                return;
+            }
+
+            _usernameInfoLabel.text = $"Streamer: {_savedUsername}\nFirst to: {_savedMatchWinsToWin}";
         }
 
         private void SetSettingsModalVisible(bool visible, string hint)
