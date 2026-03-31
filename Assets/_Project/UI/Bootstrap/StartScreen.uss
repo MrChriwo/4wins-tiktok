@@ -1,0 +1,142 @@
+.root {
+    flex-grow: 1;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(8, 8, 12, 0.98);
+    padding-left: 3%;
+    padding-right: 3%;
+    padding-top: 3%;
+    padding-bottom: 3%;
+}
+
+.main-content {
+    width: 100%;
+    max-width: 960px;
+    align-items: center;
+    justify-content: center;
+}
+
+.title {
+    font-size: 86px;
+    -unity-font-style: bold;
+    letter-spacing: 8px;
+    color: rgb(255, 210, 130);
+    -unity-text-align: middle-center;
+    margin-bottom: 4px;
+}
+
+.subtitle {
+    font-size: 28px;
+    color: rgb(255, 184, 92);
+    -unity-text-align: middle-center;
+    margin-bottom: 16px;
+}
+
+.username-info {
+    font-size: 24px;
+    color: rgb(255, 210, 145);
+    -unity-text-align: middle-center;
+    margin-bottom: 20px;
+}
+
+.button-row {
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.primary-button,
+.secondary-button {
+    min-width: 220px;
+    height: 56px;
+    margin-left: 8px;
+    margin-right: 8px;
+    margin-top: 8px;
+    margin-bottom: 8px;
+    font-size: 22px;
+    -unity-font-style: bold;
+}
+
+.primary-button {
+    background-color: rgba(255, 149, 36, 0.95);
+    color: rgba(25, 14, 8, 1);
+}
+
+.secondary-button {
+    background-color: rgba(90, 60, 32, 0.95);
+    color: rgba(255, 210, 150, 1);
+}
+
+.progress {
+    width: 72%;
+    min-width: 280px;
+    height: 26px;
+    margin-bottom: 14px;
+}
+
+.status {
+    font-size: 22px;
+    color: rgb(255, 198, 120);
+    -unity-text-align: middle-center;
+}
+
+.modal-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    display: none;
+    justify-content: center;
+    align-items: center;
+    background-color: rgba(0, 0, 0, 0.6);
+}
+
+.modal-card {
+    width: 560px;
+    max-width: 92%;
+    padding-left: 20px;
+    padding-right: 20px;
+    padding-top: 20px;
+    padding-bottom: 20px;
+    border-top-left-radius: 10px;
+    border-top-right-radius: 10px;
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+    background-color: rgba(24, 18, 10, 0.98);
+}
+
+.modal-title {
+    font-size: 40px;
+    -unity-font-style: bold;
+    color: rgb(255, 210, 130);
+    -unity-text-align: middle-center;
+}
+
+.modal-subtitle {
+    margin-top: 6px;
+    margin-bottom: 12px;
+    font-size: 18px;
+    color: rgb(255, 184, 92);
+    -unity-text-align: middle-center;
+}
+
+.settings-input {
+    margin-top: 6px;
+    margin-bottom: 8px;
+}
+
+.settings-hint {
+    min-height: 24px;
+    font-size: 16px;
+    color: rgb(255, 168, 90);
+}
+
+.modal-button-row {
+    flex-direction: row;
+    justify-content: flex-end;
+    align-items: center;
+    flex-wrap: wrap;
+}

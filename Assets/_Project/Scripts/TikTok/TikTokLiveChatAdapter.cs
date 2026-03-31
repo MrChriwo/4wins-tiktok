@@ -15,10 +15,14 @@ namespace FourWinsTikTok.TikTok
         [SerializeField] private bool logConnectionEvents = true;
 
         public event Action<ChatMessage> OnChatMessageReceived;
+        public event Action<bool, string> OnConnectionStateChanged;
 
         private TikTokLiveManager Manager => TikTokLiveManager.Instance;
         private bool _subscribed;
         private TikTokLiveManager _boundManager;
+
+        public bool IsConnected => _boundManager != null && _boundManager.Connected;
+        public bool IsConnecting => _boundManager != null && _boundManager.Connecting;
 
         private void OnEnable()
         {
@@ -150,6 +154,41 @@ namespace FourWinsTikTok.TikTok
             }
         }
 
+        public void ConnectWithHostId(string hostId)
+        {
+            string normalizedHostId = NormalizeHostId(hostId);
+            if (string.IsNullOrWhiteSpace(normalizedHostId))
+            {
+                Debug.LogWarning("TikTokLiveChatAdapter: Cannot connect. Host id is empty.");
+                return;
+            }
+
+            TikTokLiveManager manager = _boundManager ?? Manager;
+            _boundManager = manager;
+
+            if (!_subscribed)
+            {
+                SubscribeToManager();
+            }
+
+            if (manager.Connected || manager.Connecting)
+            {
+                if (logConnectionEvents)
+                {
+                    Debug.Log($"TikTokLiveChatAdapter: ConnectWithHostId skipped (Connected={manager.Connected}, Connecting={manager.Connecting}).");
+                }
+
+                return;
+            }
+
+            if (logConnectionEvents)
+            {
+                Debug.Log($"TikTokLiveChatAdapter: Connecting to host id '{normalizedHostId}' (runtime).");
+            }
+
+            manager.ConnectToStreamAsync(normalizedHostId, Debug.LogException);
+        }
+
         public void Disconnect()
         {
             TikTokLiveManager manager = _boundManager;
@@ -172,19 +211,24 @@ namespace FourWinsTikTok.TikTok
 
         private void HandleConnected(TikTokLiveClient sender, bool connected)
         {
+            string target = !string.IsNullOrWhiteSpace(Manager.HostName)
+                ? Manager.HostName
+                : !string.IsNullOrWhiteSpace(Manager.RoomId) ? Manager.RoomId : "unknown";
+
+            OnConnectionStateChanged?.Invoke(true, target);
+
             if (!logConnectionEvents)
             {
                 return;
             }
 
-            string target = !string.IsNullOrWhiteSpace(Manager.HostName)
-                ? Manager.HostName
-                : !string.IsNullOrWhiteSpace(Manager.RoomId) ? Manager.RoomId : "unknown";
             Debug.Log($"TikTokLiveChatAdapter: Connected to '{target}'.");
         }
 
         private void HandleDisconnected(TikTokLiveClient sender, bool connected)
         {
+            OnConnectionStateChanged?.Invoke(false, "");
+
             if (logConnectionEvents)
             {
                 Debug.Log("TikTokLiveChatAdapter: Disconnected from livestream.");

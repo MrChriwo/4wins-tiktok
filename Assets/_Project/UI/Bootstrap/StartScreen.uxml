@@ -1,0 +1,35 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
+    <ui:Style src="StartScreen.uss" />
+
+    <ui:VisualElement class="root">
+        <ui:VisualElement class="main-content">
+            <ui:Label class="title" text="4 Wins" />
+            <ui:Label class="subtitle" text="TikTok Community vs Streamer" />
+
+            <ui:Label name="username-info-label" class="username-info" text="No username set. Open settings." />
+
+            <ui:VisualElement class="button-row">
+                <ui:Button name="start-button" text="Start Game" class="primary-button" />
+                <ui:Button name="settings-button" text="Settings" class="secondary-button" />
+            </ui:VisualElement>
+
+            <ui:ProgressBar name="loading-progress" title="Loading" low-value="0" high-value="100" value="0" class="progress" />
+            <ui:Label name="status-label" class="status" text="Ready" />
+        </ui:VisualElement>
+
+        <ui:VisualElement name="settings-modal" class="modal-overlay">
+            <ui:VisualElement class="modal-card">
+                <ui:Label class="modal-title" text="Settings" />
+                <ui:Label class="modal-subtitle" text="Set TikTok streamer username" />
+
+                <ui:TextField name="settings-username-field" label="Username" value="" class="settings-input" />
+                <ui:Label name="settings-hint-label" class="settings-hint" text="" />
+
+                <ui:VisualElement class="modal-button-row">
+                    <ui:Button name="settings-save-button" text="Save" class="primary-button" />
+                    <ui:Button name="settings-cancel-button" text="Cancel" class="secondary-button" />
+                </ui:VisualElement>
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>
