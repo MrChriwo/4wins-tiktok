@@ -107,6 +107,16 @@ namespace FourWinsTikTok.TikTok
 
         public void Connect()
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (logConnectionEvents)
+            {
+                Debug.LogWarning("TikTokLiveChatAdapter: Connect is disabled on WebGL runtime.");
+            }
+
+            OnConnectionStateChanged?.Invoke(false, "webgl-unsupported");
+            return;
+#endif
+
             if (connectionConfig == null)
             {
                 if (logConnectionEvents)
@@ -162,6 +172,16 @@ namespace FourWinsTikTok.TikTok
 
         public void ConnectWithHostId(string hostId)
         {
+#if UNITY_WEBGL && !UNITY_EDITOR
+            if (logConnectionEvents)
+            {
+                Debug.LogWarning("TikTokLiveChatAdapter: ConnectWithHostId is disabled on WebGL runtime.");
+            }
+
+            OnConnectionStateChanged?.Invoke(false, "webgl-unsupported");
+            return;
+#endif
+
             string normalizedHostId = NormalizeHostId(hostId);
             if (string.IsNullOrWhiteSpace(normalizedHostId))
             {
@@ -260,7 +280,12 @@ namespace FourWinsTikTok.TikTok
                 Debug.Log($"TikTok chat '{userId}': {message}");
             }
 
-            OnChatMessageReceived?.Invoke(new ChatMessage(userId, message));
+            OnChatMessageReceived?.Invoke(new ChatMessage(
+                userId,
+                chatMessage.Sender.UniqueId,
+                message,
+                chatMessage.Sender.AvatarThumbnail,
+                null));
         }
 
         private void HandleGift(TikTokLiveClient sender, TikTokGift gift)
@@ -281,7 +306,8 @@ namespace FourWinsTikTok.TikTok
                 userId,
                 gift.Sender.UniqueId,
                 giftName.Trim(),
-                gift.Sender.AvatarThumbnail));
+                gift.Sender.AvatarThumbnail,
+                null));
         }
 
         private static string NormalizeHostId(string hostId)

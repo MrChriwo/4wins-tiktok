@@ -53,7 +53,7 @@ namespace FourWinsTikTok.Gameplay
             return !string.IsNullOrWhiteSpace(userId) && _participantsByUserId.ContainsKey(userId);
         }
 
-        public bool TryRegisterParticipant(string userId, string displayName, Picture avatarPicture, out ParticipantInfo participant)
+        public bool TryRegisterParticipant(string userId, string displayName, Picture avatarPicture, string avatarUrl, out ParticipantInfo participant)
         {
             participant = null;
             if (string.IsNullOrWhiteSpace(userId))
@@ -66,7 +66,7 @@ namespace FourWinsTikTok.Gameplay
                 return false;
             }
 
-            participant = new ParticipantInfo(userId, string.IsNullOrWhiteSpace(displayName) ? userId : displayName, avatarPicture);
+            participant = new ParticipantInfo(userId, string.IsNullOrWhiteSpace(displayName) ? userId : displayName, avatarPicture, avatarUrl);
             _participantsByUserId[userId] = participant;
             OnParticipantRegistered?.Invoke(participant);
             return true;
@@ -75,15 +75,17 @@ namespace FourWinsTikTok.Gameplay
 
     public sealed class ParticipantInfo
     {
-        public ParticipantInfo(string userId, string displayName, Picture avatarPicture)
+        public ParticipantInfo(string userId, string displayName, Picture avatarPicture, string avatarUrl)
         {
             UserId = userId;
             DisplayName = displayName;
             AvatarPicture = avatarPicture;
+            AvatarUrl = avatarUrl;
         }
 
         public string UserId { get; }
         public string DisplayName { get; }
         public Picture AvatarPicture { get; }
+        public string AvatarUrl { get; }
     }
 }

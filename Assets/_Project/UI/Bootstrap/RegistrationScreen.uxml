@@ -6,6 +6,7 @@
         <ui:Label name="gift-label" class="gift-label" text="Send gift to register" />
         <ui:Label name="timer-label" class="timer-label" text="20" />
         <ui:Label name="status-label" class="status-label" text="Waiting for participants..." />
+        <ui:Button name="start-game-button" class="start-game-button" text="Start Game" />
 
         <ui:ScrollView name="participants-scroll" class="participants-scroll" />
     </ui:VisualElement>

@@ -17,8 +17,13 @@ MonoBehaviour:
   <DropStartHeight>k__BackingField: 4
   <DropDuration>k__BackingField: 0.2
   <CellOffset>k__BackingField: {x: 0, y: 0, z: 0}
+  <GenerateColumnClickTargets>k__BackingField: 1
+  <ClickTargetWidthFactor>k__BackingField: 0.9
+  <ClickTargetDepth>k__BackingField: 0.8
   <FallbackChipScale>k__BackingField: {x: 0.8, y: 0.2, z: 0.8}
   <CommunityFallbackColor>k__BackingField: {r: 0.95, g: 0.25, b: 0.25, a: 1}
+  <StreamerFallbackColor>k__BackingField: {r: 0.2, g: 0.7, b: 1, a: 1}
   <BotFallbackColor>k__BackingField: {r: 0.95, g: 0.85, b: 0.2, a: 1}
-  <CommunityChipPrefab>k__BackingField: {fileID: 0}
+  <CommunityChipPrefab>k__BackingField: {fileID: 7776284713686831696, guid: ceb8259a132df00d4ba65f31ab879eff, type: 3}
+  <StreamerChipPrefab>k__BackingField: {fileID: 7816213923639839415, guid: 7ac3bd937006f9475883fc912a879d1e, type: 3}
   <BotChipPrefab>k__BackingField: {fileID: 0}

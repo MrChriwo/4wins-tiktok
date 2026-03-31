@@ -2,7 +2,7 @@
     flex-grow: 1;
     align-items: center;
     justify-content: flex-start;
-    background-color: rgba(8, 8, 12, 0.98);
+    background-color: rgba(8, 8, 12, 0.5);
     padding-top: 20px;
 }
 
@@ -34,6 +34,17 @@
     font-size: 20px;
     color: rgb(255, 210, 145);
     -unity-text-align: middle-center;
+}
+
+.start-game-button {
+    display: none;
+    width: 240px;
+    height: 50px;
+    margin-bottom: 10px;
+    font-size: 22px;
+    -unity-font-style: bold;
+    color: rgba(34, 16, 8, 1);
+    background-color: rgba(255, 116, 36, 0.98);
 }
 
 .participants-scroll {

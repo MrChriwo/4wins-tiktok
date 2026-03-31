@@ -6,7 +6,6 @@ using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
 using FourWinsTikTok.Core;
 using FourWinsTikTok.TikTok;
-using FourWinsTikTok.Voting;
 using UnityEngine;
 
 namespace FourWinsTikTok.Gameplay
@@ -15,7 +14,7 @@ namespace FourWinsTikTok.Gameplay
     {
         [Header("Config")]
         [SerializeField] private ConnectFourGameConfig gameConfig;
-        [SerializeField] private VoteRulesConfig voteRulesConfig;
+        [SerializeField, Min(5f)] private float communityParticipantTurnSeconds = 60f;
 
         [Header("References")]
         [SerializeField] private TurnTimer turnTimer;
@@ -32,22 +31,26 @@ namespace FourWinsTikTok.Gameplay
         public event Action<int, int, PlayerSide> OnDiscPlaced;
         public event Action<GameFlowState> OnStateChanged;
         public event Action<float> OnTimerChanged;
-        public event Action<IReadOnlyList<VoteTally>> OnVoteUpdated;
+        public event Action<IReadOnlyList<Voting.VoteTally>> OnVoteUpdated;
         public event Action<string> OnStatusMessage;
         public event Action<PlayerSide> OnGameOver;
         public event Action<int, int, int, int> OnRoundScoreChanged;
         public event Action<PlayerSide, bool> OnRoundCompleted;
+        public event Action<string> OnCommunityParticipantTurnChanged;
 
         private readonly System.Random _random = new System.Random();
         private IBotPlayer _botPlayer;
-        private VoteSystem _voteSystem;
         private ParticipantRegistryService _participantRegistry;
         private Coroutine _botTurnRoutine;
+        private readonly List<ParticipantInfo> _communityTurnParticipants = new List<ParticipantInfo>();
+        private int _activeCommunityParticipantIndex = -1;
+        private string _activeCommunityParticipantUserId = string.Empty;
         private int _currentRound = 1;
         private int _communityWins;
         private int _opponentWins;
         private bool _matchOver;
         private int _matchWinsRequired = 5;
+        private float _participantTurnSecondsRuntime = 60f;
 
         public BoardState CurrentBoard { get; private set; }
         public GameFlowState CurrentState { get; private set; } = GameFlowState.Idle;
@@ -117,7 +120,6 @@ namespace FourWinsTikTok.Gameplay
 
             turnTimer.CancelCountdown();
 
-            _voteSystem = new VoteSystem(voteRulesConfig, gameConfig.Columns);
             _participantRegistry = ParticipantRegistryService.EnsureInstance();
             if (!useLocalStreamerInsteadOfBot)
             {
@@ -128,11 +130,17 @@ namespace FourWinsTikTok.Gameplay
                 PlayerPrefs.GetInt(BootstrapKeys.MatchWinsToWinPlayerPrefsKey, gameConfig.MatchWinsRequired),
                 1,
                 25);
+            _participantTurnSecondsRuntime = Mathf.Clamp(
+                PlayerPrefs.GetInt(BootstrapKeys.ParticipantTurnDurationSecondsPlayerPrefsKey, Mathf.RoundToInt(communityParticipantTurnSeconds)),
+                5,
+                300);
 
             _currentRound = 1;
             _communityWins = 0;
             _opponentWins = 0;
             _matchOver = false;
+            _activeCommunityParticipantIndex = -1;
+            _activeCommunityParticipantUserId = string.Empty;
 
             SetState(GameFlowState.Idle);
             ActivePlayer = PlayerSide.None;
@@ -182,12 +190,6 @@ namespace FourWinsTikTok.Gameplay
                 return false;
             }
 
-            if (voteRulesConfig == null)
-            {
-                Debug.LogError("GameFlowController: Missing vote rules config.");
-                return false;
-            }
-
             if (turnTimer == null)
             {
                 Debug.LogError("GameFlowController: Missing TurnTimer reference.");
@@ -202,7 +204,7 @@ namespace FourWinsTikTok.Gameplay
             CurrentBoard = new BoardState(gameConfig.Columns, gameConfig.Rows, gameConfig.ConnectLength);
             OnBoardInitialized?.Invoke(CurrentBoard.Columns, CurrentBoard.Rows);
             OnBoardChanged?.Invoke(CurrentBoard);
-            OnVoteUpdated?.Invoke(Array.Empty<VoteTally>());
+            OnVoteUpdated?.Invoke(Array.Empty<Voting.VoteTally>());
             OnTimerChanged?.Invoke(0f);
         }
 
@@ -225,14 +227,26 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
+            _communityTurnParticipants.Clear();
+            if (_participantRegistry != null)
+            {
+                foreach (ParticipantInfo participant in _participantRegistry.Participants)
+                {
+                    _communityTurnParticipants.Add(participant);
+                }
+            }
+
+            if (_communityTurnParticipants.Count == 0)
+            {
+                EndAsDraw();
+                return;
+            }
+
             ActivePlayer = PlayerSide.Community;
-            _voteSystem.BeginRound();
-            OnVoteUpdated?.Invoke(_voteSystem.GetRanking());
+            OnVoteUpdated?.Invoke(Array.Empty<Voting.VoteTally>());
 
             SetState(GameFlowState.WaitingForCommunityVote);
-            OnStatusMessage?.Invoke("Community turn: vote with 1-7 in chat.");
-
-            turnTimer.StartCountdown(gameConfig.CommunityVoteSeconds);
+            AdvanceToNextCommunityParticipant();
         }
 
         private void HandleTimerTick(float remainingSeconds)
@@ -247,76 +261,70 @@ namespace FourWinsTikTok.Gameplay
         {
             string sanitizedMessage = chatMessage.Message?.Trim();
 
+#if UNITY_EDITOR
+            if (TryHandleEditorAdminCommand(chatMessage, sanitizedMessage))
+            {
+                return;
+            }
+#endif
+
             if (logVoteFlow)
             {
                 Debug.Log($"GameFlowController: Chat received user='{chatMessage.UserId}', message='{sanitizedMessage}', state='{CurrentState}'.");
             }
 
-            if (CurrentState != GameFlowState.WaitingForCommunityVote || _voteSystem == null)
+            if (CurrentState != GameFlowState.WaitingForCommunityVote)
             {
                 if (logVoteFlow)
                 {
-                    Debug.Log("GameFlowController: Vote ignored because community vote phase is not active.");
+                    Debug.Log("GameFlowController: Message ignored because community participant turn phase is not active.");
                 }
 
                 return;
             }
 
-            if (_participantRegistry != null && !_participantRegistry.IsRegistered(chatMessage.UserId))
+            if (!string.Equals(chatMessage.UserId, _activeCommunityParticipantUserId, StringComparison.OrdinalIgnoreCase))
             {
                 if (logVoteFlow)
                 {
-                    Debug.Log($"GameFlowController: Vote ignored because user '{chatMessage.UserId}' is not registered.");
+                    Debug.Log($"GameFlowController: Message ignored because user '{chatMessage.UserId}' is not the active participant.");
                 }
 
                 return;
             }
 
-            bool looksNumericVote = sanitizedMessage is "1" or "2" or "3" or "4" or "5" or "6" or "7";
-            if (logVoteFlow && looksNumericVote)
-            {
-                Debug.Log($"GameFlowController: Numeric vote detected -> '{sanitizedMessage}' from '{chatMessage.UserId}'.");
-            }
-
-            if (!_voteSystem.TryRegisterVote(chatMessage.UserId, sanitizedMessage))
+            if (sanitizedMessage is not ("1" or "2" or "3" or "4" or "5" or "6" or "7"))
             {
                 if (logVoteFlow)
                 {
-                    Debug.Log($"GameFlowController: Vote rejected for user='{chatMessage.UserId}', message='{sanitizedMessage}'.");
+                    Debug.Log($"GameFlowController: Message '{sanitizedMessage}' is not a valid column number.");
                 }
 
                 return;
             }
 
-            if (logVoteFlow)
+            int selectedColumn = int.Parse(sanitizedMessage) - 1;
+            if (CurrentBoard.IsColumnFull(selectedColumn))
             {
-                Debug.Log($"GameFlowController: Vote accepted for user='{chatMessage.UserId}', message='{sanitizedMessage}'.");
-            }
+                if (logVoteFlow)
+                {
+                    Debug.Log($"GameFlowController: Column '{selectedColumn + 1}' is full.");
+                }
 
-            OnVoteUpdated?.Invoke(_voteSystem.GetRanking());
-        }
+                OnStatusMessage?.Invoke($"Column {selectedColumn + 1} is full. {_activeCommunityParticipantUserId}, pick another (1-7).");
 
-        private void HandleCommunityTimerCompleted()
-        {
-            if (CurrentState != GameFlowState.WaitingForCommunityVote || CurrentBoard == null || _voteSystem == null)
-            {
                 return;
             }
 
-            ResolveCommunityMove();
-        }
-
-        private void ResolveCommunityMove()
-        {
-            SetState(GameFlowState.ResolvingCommunityMove);
-            _voteSystem.EndRound();
-
-            int selectedColumn = SelectCommunityColumn();
+            turnTimer.CancelCountdown();
             if (!TryExecuteMove(selectedColumn, PlayerSide.Community))
             {
                 EndAsDraw();
                 return;
             }
+
+            _activeCommunityParticipantUserId = string.Empty;
+            OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
 
             if (CurrentState != GameFlowState.GameOver)
             {
@@ -329,6 +337,98 @@ namespace FourWinsTikTok.Gameplay
                     BeginBotTurn();
                 }
             }
+        }
+
+#if UNITY_EDITOR
+        private bool TryHandleEditorAdminCommand(ChatMessage chatMessage, string sanitizedMessage)
+        {
+            if (!string.Equals(chatMessage.UserId, "ichriwo", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            bool isRegisterCommand = string.Equals(sanitizedMessage, "/register", StringComparison.OrdinalIgnoreCase)
+                                     || string.Equals(sanitizedMessage, "/registration", StringComparison.OrdinalIgnoreCase);
+            if (isRegisterCommand)
+            {
+                _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
+                string displayName = string.IsNullOrWhiteSpace(chatMessage.DisplayName) ? chatMessage.UserId : chatMessage.DisplayName;
+                if (_participantRegistry.TryRegisterParticipant(chatMessage.UserId, displayName, chatMessage.AvatarPicture, chatMessage.AvatarUrl, out ParticipantInfo participant))
+                {
+                    if (CurrentState == GameFlowState.WaitingForCommunityVote)
+                    {
+                        _communityTurnParticipants.Add(participant);
+                    }
+
+                    OnStatusMessage?.Invoke($"Admin register: {_participantRegistry.Count} participants.");
+                }
+
+                return true;
+            }
+
+            if (string.Equals(sanitizedMessage, "/takeover", StringComparison.OrdinalIgnoreCase))
+            {
+                if (CurrentState == GameFlowState.WaitingForCommunityVote)
+                {
+                    _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
+
+                    ParticipantInfo takeoverParticipant = _communityTurnParticipants.Find(participant =>
+                        string.Equals(participant.UserId, chatMessage.UserId, StringComparison.OrdinalIgnoreCase));
+
+                    if (takeoverParticipant == null)
+                    {
+                        string displayName = string.IsNullOrWhiteSpace(chatMessage.DisplayName) ? chatMessage.UserId : chatMessage.DisplayName;
+                        if (_participantRegistry.TryRegisterParticipant(chatMessage.UserId, displayName, chatMessage.AvatarPicture, chatMessage.AvatarUrl, out ParticipantInfo registeredParticipant))
+                        {
+                            takeoverParticipant = registeredParticipant;
+                        }
+                        else
+                        {
+                            foreach (ParticipantInfo participant in _participantRegistry.Participants)
+                            {
+                                if (string.Equals(participant.UserId, chatMessage.UserId, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    takeoverParticipant = participant;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (takeoverParticipant != null)
+                        {
+                            _communityTurnParticipants.Add(takeoverParticipant);
+                        }
+                    }
+
+                    int takeoverIndex = _communityTurnParticipants.FindIndex(participant =>
+                        string.Equals(participant.UserId, chatMessage.UserId, StringComparison.OrdinalIgnoreCase));
+
+                    if (takeoverIndex >= 0)
+                    {
+                        _activeCommunityParticipantIndex = takeoverIndex;
+                        _activeCommunityParticipantUserId = chatMessage.UserId;
+                        turnTimer.CancelCountdown();
+                        turnTimer.StartCountdown(_participantTurnSecondsRuntime);
+                        OnCommunityParticipantTurnChanged?.Invoke(_activeCommunityParticipantUserId);
+                        OnStatusMessage?.Invoke("Admin takeover: ichriwo is up now.");
+                    }
+                }
+
+                return true;
+            }
+
+            return false;
+        }
+#endif
+
+        private void HandleCommunityTimerCompleted()
+        {
+            if (CurrentState != GameFlowState.WaitingForCommunityVote || CurrentBoard == null)
+            {
+                return;
+            }
+
+            AdvanceToNextCommunityParticipant();
         }
 
         public bool TrySubmitStreamerMoveFromDisplayColumn(int displayColumn)
@@ -381,28 +481,30 @@ namespace FourWinsTikTok.Gameplay
             return true;
         }
 
-        private int SelectCommunityColumn()
+        private void AdvanceToNextCommunityParticipant()
         {
-            List<int> validColumns = CurrentBoard.GetValidColumns();
-            if (validColumns.Count == 0)
+            if (_communityTurnParticipants.Count == 0)
             {
-                return -1;
+                EndAsDraw();
+                return;
             }
 
-            HashSet<int> validSet = new HashSet<int>(validColumns);
-            IReadOnlyList<VoteTally> ranking = _voteSystem.GetRanking();
-
-            for (int index = 0; index < ranking.Count; index++)
+            _activeCommunityParticipantIndex++;
+            if (_activeCommunityParticipantIndex >= _communityTurnParticipants.Count)
             {
-                int rankedColumn = ranking[index].ColumnIndex;
-                if (validSet.Contains(rankedColumn))
-                {
-                    return rankedColumn;
-                }
+                _activeCommunityParticipantIndex = 0;
             }
 
-            int randomValidIndex = _random.Next(0, validColumns.Count);
-            return validColumns[randomValidIndex];
+            ParticipantInfo activeParticipant = _communityTurnParticipants[_activeCommunityParticipantIndex];
+            _activeCommunityParticipantUserId = activeParticipant.UserId;
+
+            string displayName = string.IsNullOrWhiteSpace(activeParticipant.DisplayName)
+                ? activeParticipant.UserId
+                : activeParticipant.DisplayName;
+
+            OnCommunityParticipantTurnChanged?.Invoke(_activeCommunityParticipantUserId);
+            OnStatusMessage?.Invoke($"{displayName} is up! Send 1-7 in {Mathf.RoundToInt(_participantTurnSecondsRuntime)}s.");
+            turnTimer.StartCountdown(_participantTurnSecondsRuntime);
         }
 
         private void BeginBotTurn()
@@ -454,6 +556,8 @@ namespace FourWinsTikTok.Gameplay
 
             SetState(GameFlowState.WaitingForStreamerMove);
             ActivePlayer = PlayerSide.Streamer;
+            _activeCommunityParticipantUserId = string.Empty;
+            OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
             OnStatusMessage?.Invoke("Streamer turn: click a column or press 1-7.");
             OnTimerChanged?.Invoke(0f);
         }

@@ -7,7 +7,7 @@
     padding-bottom: 8px;
     padding-left: 10px;
     padding-right: 10px;
-    background-color: rgba(8, 8, 12, 0.65);
+    background-color: rgba(8, 8, 12, 0.15);
 }
 
 .content-row {
@@ -143,10 +143,32 @@
     max-height: 540px;
 }
 
+.participants-scroll > .unity-scroll-view__vertical-scroller,
+.participants-scroll > .unity-scroll-view__horizontal-scroller {
+    display: none;
+}
+
 .participant-row {
     flex-direction: row;
     align-items: center;
     margin-bottom: 8px;
+    padding: 6px;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    border-bottom-left-radius: 8px;
+    border-bottom-right-radius: 8px;
+    background-color: rgba(70, 45, 24, 0.35);
+    transition-property: scale, background-color;
+    transition-duration: 0.14s;
+    transition-timing-function: ease-out;
+}
+
+.participant-row.active-turn {
+    background-color: rgba(255, 158, 72, 0.42);
+}
+
+.participant-row.active-turn-pulse {
+    background-color: rgba(255, 196, 120, 0.62);
 }
 
 .participant-avatar {

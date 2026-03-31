@@ -9,6 +9,7 @@ using FourWinsTikTok.TikTok;
 using FourWinsTikTok.Voting;
 using TikTokLiveUnity;
 using UnityEngine;
+using UnityEngine.Networking;
 using UnityEngine.UIElements;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -49,6 +50,11 @@ namespace FourWinsTikTok.UI
         private Label _popupWinnerLabel;
         private Button _nextRoundButton;
         private ParticipantRegistryService _participantRegistry;
+        private readonly Dictionary<string, VisualElement> _participantRowsByUserId = new Dictionary<string, VisualElement>(System.StringComparer.OrdinalIgnoreCase);
+        private string _activeParticipantUserId = string.Empty;
+        private IVisualElementScheduledItem _activePulseItem;
+        private VisualElement _activePulseRow;
+        private bool _activePulseState;
 
         private float _lastDebugScaleMultiplier;
         private Vector2 _lastDebugCellSizeOffset;
@@ -95,6 +101,7 @@ namespace FourWinsTikTok.UI
             gameFlowController.OnGameOver += HandleGameOver;
             gameFlowController.OnRoundScoreChanged += HandleRoundScoreChanged;
             gameFlowController.OnRoundCompleted += HandleRoundCompleted;
+            gameFlowController.OnCommunityParticipantTurnChanged += HandleCommunityParticipantTurnChanged;
 
             if (_nextRoundButton != null)
             {
@@ -123,6 +130,7 @@ namespace FourWinsTikTok.UI
                 gameFlowController.OnGameOver -= HandleGameOver;
                 gameFlowController.OnRoundScoreChanged -= HandleRoundScoreChanged;
                 gameFlowController.OnRoundCompleted -= HandleRoundCompleted;
+                gameFlowController.OnCommunityParticipantTurnChanged -= HandleCommunityParticipantTurnChanged;
             }
 
             if (_nextRoundButton != null)
@@ -135,6 +143,8 @@ namespace FourWinsTikTok.UI
                 _participantRegistry.OnParticipantRegistered -= HandleParticipantRegistered;
                 _participantRegistry.OnCleared -= HandleParticipantsCleared;
             }
+
+            StopActiveParticipantPulse();
         }
 
         private bool TryBindUi()
@@ -237,7 +247,7 @@ namespace FourWinsTikTok.UI
 
             if (ranking == null || ranking.Count == 0)
             {
-                _votingLabel.text = "Votes: no valid votes yet";
+                _votingLabel.text = "Turn mode: participants";
                 return;
             }
 
@@ -295,7 +305,7 @@ namespace FourWinsTikTok.UI
 
             if (_chatNameLabel != null)
             {
-                _chatNameLabel.text = "Chat";
+                _chatNameLabel.text = GetCommunityDisplayName();
             }
 
             if (_chatScoreLabel != null)
@@ -343,15 +353,15 @@ namespace FourWinsTikTok.UI
 
         private void HandleRoundCompleted(PlayerSide winner, bool isMatchOver)
         {
-            string streamerName = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
-            string opponentName = string.IsNullOrWhiteSpace(streamerName) ? "Streamer" : streamerName;
+            string communityName = GetCommunityDisplayName();
+            string opponentName = GetStreamerDisplayName();
 
             if (_popupWinnerLabel != null)
             {
                 _popupWinnerLabel.text = winner == PlayerSide.None
                     ? "Draw"
                     : winner == PlayerSide.Community
-                        ? isMatchOver ? "Chat Wins The Match" : "Chat Wins"
+                        ? isMatchOver ? $"{communityName} Wins The Match" : $"{communityName} Wins"
                         : winner == PlayerSide.Streamer
                             ? isMatchOver ? $"{opponentName} Wins The Match" : $"{opponentName} Wins"
                             : isMatchOver ? "Bot Wins The Match" : "Bot Wins";
@@ -383,6 +393,7 @@ namespace FourWinsTikTok.UI
             }
 
             _participantsScroll.contentContainer.Clear();
+            _participantRowsByUserId.Clear();
             if (_participantRegistry == null)
             {
                 return;
@@ -402,6 +413,9 @@ namespace FourWinsTikTok.UI
             }
 
             _participantsScroll.contentContainer.Clear();
+            _participantRowsByUserId.Clear();
+            _activeParticipantUserId = string.Empty;
+            StopActiveParticipantPulse();
         }
 
         private void HandleParticipantRegistered(ParticipantInfo participant)
@@ -428,19 +442,52 @@ namespace FourWinsTikTok.UI
             row.Add(nameLabel);
 
             _participantsScroll.Add(row);
-
-            if (participant.AvatarPicture == null || TikTokLiveManager.Instance == null)
+            _participantRowsByUserId[participant.UserId] = row;
+            if (string.Equals(_activeParticipantUserId, participant.UserId, System.StringComparison.OrdinalIgnoreCase))
             {
+                SetActiveParticipantRow(row);
+            }
+
+            if (participant.AvatarPicture != null && TikTokLiveManager.Instance != null)
+            {
+                TikTokLiveManager.Instance.RequestSprite(participant.AvatarPicture, sprite =>
+                {
+                    if (sprite != null)
+                    {
+                        avatar.style.backgroundImage = new StyleBackground(sprite);
+                    }
+                });
                 return;
             }
 
-            TikTokLiveManager.Instance.RequestSprite(participant.AvatarPicture, sprite =>
+            if (!string.IsNullOrWhiteSpace(participant.AvatarUrl))
             {
-                if (sprite != null)
+                StartCoroutine(LoadAvatarFromUrlRoutine(avatar, participant.AvatarUrl));
+            }
+        }
+
+        private IEnumerator LoadAvatarFromUrlRoutine(VisualElement avatarElement, string avatarUrl)
+        {
+            using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(avatarUrl))
+            {
+                request.timeout = 10;
+                yield return request.SendWebRequest();
+
+                if (request.result != UnityWebRequest.Result.Success)
                 {
-                    avatar.style.backgroundImage = new StyleBackground(sprite);
+                    yield break;
                 }
-            });
+
+                Texture2D texture = DownloadHandlerTexture.GetContent(request);
+                if (texture == null)
+                {
+                    yield break;
+                }
+
+                Rect textureRect = new Rect(0f, 0f, texture.width, texture.height);
+                Sprite sprite = Sprite.Create(texture, textureRect, new Vector2(0.5f, 0.5f));
+                avatarElement.style.backgroundImage = new StyleBackground(sprite);
+            }
         }
 
         private void SetWinnerPopupVisible(bool visible)
@@ -451,6 +498,66 @@ namespace FourWinsTikTok.UI
             }
         }
 
+        private void HandleCommunityParticipantTurnChanged(string userId)
+        {
+            _activeParticipantUserId = userId;
+
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                StopActiveParticipantPulse();
+                return;
+            }
+
+            if (_participantRowsByUserId.TryGetValue(userId, out VisualElement row))
+            {
+                SetActiveParticipantRow(row);
+            }
+        }
+
+        private void SetActiveParticipantRow(VisualElement row)
+        {
+            StopActiveParticipantPulse();
+            _activePulseRow = row;
+            _activePulseRow.AddToClassList("active-turn");
+            _activePulseState = false;
+
+            _activePulseItem = _activePulseRow.schedule.Execute(() =>
+            {
+                if (_activePulseRow == null)
+                {
+                    return;
+                }
+
+                _activePulseState = !_activePulseState;
+                if (_activePulseState)
+                {
+                    _activePulseRow.AddToClassList("active-turn-pulse");
+                }
+                else
+                {
+                    _activePulseRow.RemoveFromClassList("active-turn-pulse");
+                }
+            }).Every(420);
+        }
+
+        private void StopActiveParticipantPulse()
+        {
+            if (_activePulseItem != null)
+            {
+                _activePulseItem.Pause();
+                _activePulseItem = null;
+            }
+
+            if (_activePulseRow != null)
+            {
+                _activePulseRow.RemoveFromClassList("active-turn");
+                _activePulseRow.RemoveFromClassList("active-turn-pulse");
+                _activePulseRow = null;
+            }
+
+            _activePulseState = false;
+        }
+
         private void UpdateStreamerNameLabel()
         {
             if (_streamerNameLabel == null)
@@ -458,8 +565,19 @@ namespace FourWinsTikTok.UI
                 return;
             }
 
-            string streamerName = PlayerPrefs.GetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, string.Empty).Trim();
-            _streamerNameLabel.text = string.IsNullOrWhiteSpace(streamerName) ? "Streamer" : streamerName;
+            _streamerNameLabel.text = GetStreamerDisplayName();
+        }
+
+        private string GetCommunityDisplayName()
+        {
+            string value = PlayerPrefs.GetString(BootstrapKeys.CommunityDisplayNamePlayerPrefsKey, string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(value) ? "Chat" : value;
+        }
+
+        private string GetStreamerDisplayName()
+        {
+            string value = PlayerPrefs.GetString(BootstrapKeys.StreamerDisplayNamePlayerPrefsKey, string.Empty).Trim();
+            return string.IsNullOrWhiteSpace(value) ? "Streamer" : value;
         }
 
         private bool HasRuntimeLayoutChanged()

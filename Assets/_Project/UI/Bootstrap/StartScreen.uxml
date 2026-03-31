@@ -6,8 +6,6 @@
             <ui:Label class="title" text="4 Wins" />
             <ui:Label class="subtitle" text="TikTok Community vs Streamer" />
 
-            <ui:Label name="username-info-label" class="username-info" text="No username set. Open settings." />
-
             <ui:VisualElement class="button-row">
                 <ui:Button name="start-button" text="Start Game" class="primary-button" />
                 <ui:Button name="settings-button" text="Settings" class="secondary-button" />
@@ -23,9 +21,12 @@
                 <ui:Label class="modal-subtitle" text="Set TikTok streamer username" />
 
                 <ui:TextField name="settings-username-field" label="Username" value="" class="settings-input" />
+                <ui:TextField name="settings-community-display-field" label="Community Name" value="Chat" class="settings-input" />
+                <ui:TextField name="settings-streamer-display-field" label="Streamer Display Name" value="Streamer" class="settings-input" />
                 <ui:IntegerField name="settings-rounds-field" label="Rounds to Win" value="5" class="settings-input" />
                 <ui:TextField name="settings-gift-field" label="Registration Gift" value="Rose" class="settings-input" />
                 <ui:IntegerField name="settings-registration-seconds-field" label="Registration Time (sec)" value="20" class="settings-input" />
+                <ui:IntegerField name="settings-participant-turn-seconds-field" label="Player Turn Time (sec)" value="60" class="settings-input" />
                 <ui:Label name="settings-hint-label" class="settings-hint" text="" />
 
                 <ui:VisualElement class="modal-button-row">
