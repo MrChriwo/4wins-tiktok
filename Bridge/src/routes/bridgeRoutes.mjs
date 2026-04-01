@@ -5,6 +5,16 @@ import { connectTikTokSession, disconnectTikTokSession } from "../tiktokSession.
 
 const AVATAR_FETCH_TIMEOUT_MS = 8000;
 
+function isNoWsUpgradeError(error) {
+  if (!error) {
+    return false;
+  }
+
+  const name = String(error.name || error.type || "").toLowerCase();
+  const message = String(error.message || error || "").toLowerCase();
+  return name.includes("nowsupgradeerror") || message.includes("does not offer a websocket upgrade");
+}
+
 function buildAvatarCandidateUrls(rawUrl) {
   if (!rawUrl) {
     return [];
@@ -149,6 +159,17 @@ export function createBridgeRouter({ store, logger, config }) {
       store.markConnected(session);
       return res.json({ ok: true, hostId: session.hostId });
     } catch (error) {
+      if (isNoWsUpgradeError(error)) {
+        logger.warn({ err: error, hostId }, "connect endpoint upstream refused websocket upgrade");
+        return res.json({
+          ok: false,
+          hostId,
+          retryable: true,
+          errorCode: "NO_WS_UPGRADE",
+          error: "TikTok refused websocket upgrade for this host right now"
+        });
+      }
+
       logger.error({ err: error, hostId }, "connect endpoint failed");
       return res.status(500).json({ ok: false, error: String(error?.message || error) });
     }

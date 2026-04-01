@@ -14,25 +14,33 @@ const sweepIntervalMs = 5000;
 
 if (inactivityMs > 0) {
   setInterval(() => {
-    const expiredCount = store.sweepInactiveSessions({
-      inactivityMs,
-      onExpire: session => {
-        logger.warn(
-          {
-            hostId: session.hostId,
-            inactivityMs,
-            lastPolledAt: session.lastPolledAt || null,
-            lastConnectedAt: session.lastConnectedAt || null
-          },
-          "expiring inactive bridge session"
-        );
+    try {
+      const expiredCount = store.sweepInactiveSessions({
+        inactivityMs,
+        onExpire: session => {
+          logger.warn(
+            {
+              hostId: session.hostId,
+              inactivityMs,
+              lastPolledAt: session.lastPolledAt || null,
+              lastConnectedAt: session.lastConnectedAt || null
+            },
+            "expiring inactive bridge session"
+          );
 
-        disconnectTikTokSession({ session, store, logger });
+          try {
+            disconnectTikTokSession({ session, store, logger });
+          } catch (error) {
+            logger.error({ err: error, hostId: session.hostId }, "failed to disconnect expired session");
+          }
+        }
+      });
+
+      if (expiredCount > 0) {
+        logger.info({ expiredCount, inactivityMs }, "inactive bridge sessions expired");
       }
-    });
-
-    if (expiredCount > 0) {
-      logger.info({ expiredCount, inactivityMs }, "inactive bridge sessions expired");
+    } catch (error) {
+      logger.error({ err: error }, "inactivity sweep failed");
     }
   }, sweepIntervalMs);
 }
