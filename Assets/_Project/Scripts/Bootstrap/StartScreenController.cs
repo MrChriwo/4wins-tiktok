@@ -48,6 +48,12 @@ namespace FourWinsTikTok.Bootstrap
 
         private void OnEnable()
         {
+            TikTokLiveChatAdapter persistentAdapter = TikTokLiveChatAdapter.Instance;
+            if (persistentAdapter != null)
+            {
+                tikTokAdapter = persistentAdapter;
+            }
+
             if (uiDocument == null)
             {
                 Debug.LogError("StartScreenController: UIDocument reference missing.");
@@ -236,11 +242,7 @@ namespace FourWinsTikTok.Bootstrap
             _statusLabel.text = "Preloading game scene...";
             _progressBar.value = 0f;
 
-#if UNITY_WEBGL && !UNITY_EDITOR
-            bool requireConnectionThisRun = false;
-#else
             bool requireConnectionThisRun = requireTikTokConnection;
-#endif
 
             AsyncOperation loadOperation = loadAdditively
                 ? SceneManager.LoadSceneAsync(registrationSceneName, LoadSceneMode.Additive)
@@ -271,10 +273,6 @@ namespace FourWinsTikTok.Bootstrap
             else if (!requireConnectionThisRun)
             {
                 _isConnected = true;
-#if UNITY_WEBGL && !UNITY_EDITOR
-                _connectedTarget = "webgl-local";
-                _statusLabel.text = "WebGL mode: TikTok connection disabled. Continuing...";
-#endif
             }
             else
             {

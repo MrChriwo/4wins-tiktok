@@ -55,6 +55,10 @@ namespace FourWinsTikTok.UI
         private IVisualElementScheduledItem _activePulseItem;
         private VisualElement _activePulseRow;
         private bool _activePulseState;
+        private IVisualElementScheduledItem _gameplayUiSyncItem;
+        private GameFlowController _subscribedGameFlowController;
+        private bool _hasUiTimerCountdown;
+        private float _uiTimerCountdownEndRealtime;
 
         private float _lastDebugScaleMultiplier;
         private Vector2 _lastDebugCellSizeOffset;
@@ -66,6 +70,9 @@ namespace FourWinsTikTok.UI
 
         private void Update()
         {
+            TickUiTimerCountdown();
+            ForceSyncTimerFromGameFlow();
+
             if (!enableRuntimeLayoutDebug || !autoApplyLayoutChanges || _boardView == null)
             {
                 return;
@@ -79,8 +86,25 @@ namespace FourWinsTikTok.UI
             ApplyRuntimeLayoutAndRefreshBoard();
         }
 
+        private void ForceSyncTimerFromGameFlow()
+        {
+            if (gameFlowController == null)
+            {
+                return;
+            }
+
+            if (gameFlowController.CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            float authoritativeRemaining = gameFlowController.CommunityTurnRemainingSeconds;
+            SetTimerLabel(authoritativeRemaining);
+        }
+
         private void OnEnable()
         {
+            ResolveGameFlowControllerReference();
             if (gameFlowController == null)
             {
                 Debug.LogError("ConnectFourUIController: GameFlowController reference missing.");
@@ -92,16 +116,12 @@ namespace FourWinsTikTok.UI
                 return;
             }
 
-            gameFlowController.OnBoardInitialized += HandleBoardInitialized;
-            gameFlowController.OnBoardChanged += HandleBoardChanged;
-            gameFlowController.OnStateChanged += HandleStateChanged;
-            gameFlowController.OnTimerChanged += HandleTimerChanged;
-            gameFlowController.OnVoteUpdated += HandleVoteUpdated;
-            gameFlowController.OnStatusMessage += HandleStatusMessage;
-            gameFlowController.OnGameOver += HandleGameOver;
-            gameFlowController.OnRoundScoreChanged += HandleRoundScoreChanged;
-            gameFlowController.OnRoundCompleted += HandleRoundCompleted;
-            gameFlowController.OnCommunityParticipantTurnChanged += HandleCommunityParticipantTurnChanged;
+            EnsureGameFlowSubscription();
+
+            if (gameFlowController.CurrentBoard == null)
+            {
+                gameFlowController.StartNewGame();
+            }
 
             if (_nextRoundButton != null)
             {
@@ -113,25 +133,16 @@ namespace FourWinsTikTok.UI
             _participantRegistry.OnCleared += HandleParticipantsCleared;
             RebuildParticipantList();
 
+            _gameplayUiSyncItem = uiDocument.rootVisualElement.schedule.Execute(SyncGameplayIndicators).Every(120);
+            SyncGameplayIndicators();
+
             UpdateStreamerNameLabel();
             SetWinnerPopupVisible(false);
         }
 
         private void OnDisable()
         {
-            if (gameFlowController != null)
-            {
-                gameFlowController.OnBoardInitialized -= HandleBoardInitialized;
-                gameFlowController.OnBoardChanged -= HandleBoardChanged;
-                gameFlowController.OnStateChanged -= HandleStateChanged;
-                gameFlowController.OnTimerChanged -= HandleTimerChanged;
-                gameFlowController.OnVoteUpdated -= HandleVoteUpdated;
-                gameFlowController.OnStatusMessage -= HandleStatusMessage;
-                gameFlowController.OnGameOver -= HandleGameOver;
-                gameFlowController.OnRoundScoreChanged -= HandleRoundScoreChanged;
-                gameFlowController.OnRoundCompleted -= HandleRoundCompleted;
-                gameFlowController.OnCommunityParticipantTurnChanged -= HandleCommunityParticipantTurnChanged;
-            }
+            DetachGameFlowSubscription();
 
             if (_nextRoundButton != null)
             {
@@ -143,6 +154,51 @@ namespace FourWinsTikTok.UI
                 _participantRegistry.OnParticipantRegistered -= HandleParticipantRegistered;
                 _participantRegistry.OnCleared -= HandleParticipantsCleared;
             }
+
+            if (_gameplayUiSyncItem != null)
+            {
+                _gameplayUiSyncItem.Pause();
+                _gameplayUiSyncItem = null;
+            }
+
+            StopActiveParticipantPulse();
+        }
+
+        private void SyncGameplayIndicators()
+        {
+            EnsureGameFlowSubscription();
+            if (gameFlowController == null)
+            {
+                return;
+            }
+
+            if (gameFlowController.CurrentState == GameFlowState.WaitingForCommunityVote)
+            {
+                float controllerRemaining = gameFlowController.CommunityTurnRemainingSeconds;
+                SetTimerLabel(controllerRemaining);
+
+                string activeUserId = gameFlowController.ActiveCommunityParticipantUserId;
+                if (string.IsNullOrWhiteSpace(activeUserId))
+                {
+                    StopActiveParticipantPulse();
+                    return;
+                }
+
+                _activeParticipantUserId = activeUserId;
+                if (_participantRowsByUserId.TryGetValue(activeUserId, out VisualElement row))
+                {
+                    SetActiveParticipantRow(row);
+                }
+
+                return;
+            }
+
+            if (_timerLabel != null)
+            {
+                _timerLabel.text = string.Empty;
+            }
+
+            _hasUiTimerCountdown = false;
 
             StopActiveParticipantPulse();
         }
@@ -232,10 +288,94 @@ namespace FourWinsTikTok.UI
 
         private void HandleTimerChanged(float remainingSeconds)
         {
-            if (_timerLabel != null)
+            float clamped = Mathf.Max(0f, remainingSeconds);
+            SetTimerLabel(clamped);
+        }
+
+        private void TickUiTimerCountdown()
+        {
+            EnsureGameFlowSubscription();
+            if (gameFlowController == null)
             {
-                _timerLabel.text = $"{remainingSeconds:0.0}";
+                SetTimerLabel(0f);
+                return;
             }
+
+            if (gameFlowController.CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            float remaining = Mathf.Max(0f, gameFlowController.CommunityTurnRemainingSeconds);
+            SetTimerLabel(remaining);
+        }
+
+        private void SetTimerLabel(float remainingSeconds)
+        {
+            if (_timerLabel == null)
+            {
+                return;
+            }
+
+            _timerLabel.text = $"{Mathf.Max(0f, remainingSeconds):0.0}";
+        }
+
+        private void ResolveGameFlowControllerReference()
+        {
+            if (gameFlowController != null)
+            {
+                return;
+            }
+
+            gameFlowController = FindFirstObjectByType<GameFlowController>();
+        }
+
+        private void EnsureGameFlowSubscription()
+        {
+            ResolveGameFlowControllerReference();
+
+            if (_subscribedGameFlowController == gameFlowController)
+            {
+                return;
+            }
+
+            DetachGameFlowSubscription();
+            if (gameFlowController == null)
+            {
+                return;
+            }
+
+            gameFlowController.OnBoardInitialized += HandleBoardInitialized;
+            gameFlowController.OnBoardChanged += HandleBoardChanged;
+            gameFlowController.OnStateChanged += HandleStateChanged;
+            gameFlowController.OnTimerChanged += HandleTimerChanged;
+            gameFlowController.OnVoteUpdated += HandleVoteUpdated;
+            gameFlowController.OnStatusMessage += HandleStatusMessage;
+            gameFlowController.OnGameOver += HandleGameOver;
+            gameFlowController.OnRoundScoreChanged += HandleRoundScoreChanged;
+            gameFlowController.OnRoundCompleted += HandleRoundCompleted;
+            gameFlowController.OnCommunityParticipantTurnChanged += HandleCommunityParticipantTurnChanged;
+            _subscribedGameFlowController = gameFlowController;
+        }
+
+        private void DetachGameFlowSubscription()
+        {
+            if (_subscribedGameFlowController == null)
+            {
+                return;
+            }
+
+            _subscribedGameFlowController.OnBoardInitialized -= HandleBoardInitialized;
+            _subscribedGameFlowController.OnBoardChanged -= HandleBoardChanged;
+            _subscribedGameFlowController.OnStateChanged -= HandleStateChanged;
+            _subscribedGameFlowController.OnTimerChanged -= HandleTimerChanged;
+            _subscribedGameFlowController.OnVoteUpdated -= HandleVoteUpdated;
+            _subscribedGameFlowController.OnStatusMessage -= HandleStatusMessage;
+            _subscribedGameFlowController.OnGameOver -= HandleGameOver;
+            _subscribedGameFlowController.OnRoundScoreChanged -= HandleRoundScoreChanged;
+            _subscribedGameFlowController.OnRoundCompleted -= HandleRoundCompleted;
+            _subscribedGameFlowController.OnCommunityParticipantTurnChanged -= HandleCommunityParticipantTurnChanged;
+            _subscribedGameFlowController = null;
         }
 
         private void HandleVoteUpdated(IReadOnlyList<VoteTally> ranking)
@@ -468,26 +608,72 @@ namespace FourWinsTikTok.UI
 
         private IEnumerator LoadAvatarFromUrlRoutine(VisualElement avatarElement, string avatarUrl)
         {
-            using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(avatarUrl))
+            string[] candidates = BuildAvatarUrlCandidates(avatarUrl);
+            for (int index = 0; index < candidates.Length; index++)
             {
-                request.timeout = 10;
-                yield return request.SendWebRequest();
-
-                if (request.result != UnityWebRequest.Result.Success)
+                string candidate = candidates[index];
+                using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(candidate))
                 {
+                    request.timeout = 10;
+                    yield return request.SendWebRequest();
+
+                    if (request.result != UnityWebRequest.Result.Success)
+                    {
+                        Debug.LogWarning($"ConnectFourUIController: Avatar download failed ({request.error}) for '{candidate}'.");
+                        continue;
+                    }
+
+                    byte[] imageBytes = request.downloadHandler.data;
+                    if (imageBytes == null || imageBytes.Length == 0)
+                    {
+                        Debug.LogWarning($"ConnectFourUIController: Avatar download returned empty body for '{candidate}'.");
+                        continue;
+                    }
+
+                    Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    bool loaded = texture.LoadImage(imageBytes, false);
+                    if (!loaded)
+                    {
+                        Destroy(texture);
+                        Debug.LogWarning($"ConnectFourUIController: Avatar texture decode failed for '{candidate}'.");
+                        continue;
+                    }
+
+                    avatarElement.style.backgroundImage = new StyleBackground(texture);
                     yield break;
                 }
-
-                Texture2D texture = DownloadHandlerTexture.GetContent(request);
-                if (texture == null)
-                {
-                    yield break;
-                }
-
-                Rect textureRect = new Rect(0f, 0f, texture.width, texture.height);
-                Sprite sprite = Sprite.Create(texture, textureRect, new Vector2(0.5f, 0.5f));
-                avatarElement.style.backgroundImage = new StyleBackground(sprite);
             }
+
+            Debug.LogWarning($"ConnectFourUIController: Avatar loading failed for all candidates derived from '{avatarUrl}'.");
+        }
+
+        private static string[] BuildAvatarUrlCandidates(string originalUrl)
+        {
+            if (string.IsNullOrWhiteSpace(originalUrl))
+            {
+                return new string[0];
+            }
+
+            string trimmed = originalUrl.Trim();
+            if (trimmed.Contains("/bridge/avatar?", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return new[] { trimmed };
+            }
+
+            string lower = trimmed.ToLowerInvariant();
+            if (!lower.Contains(".webp"))
+            {
+                return new[] { trimmed };
+            }
+
+            string jpegCandidate = trimmed.Replace(".webp", ".jpeg");
+            string jpgCandidate = trimmed.Replace(".webp", ".jpg");
+            if (jpegCandidate == trimmed && jpgCandidate == trimmed)
+            {
+                return new[] { trimmed };
+            }
+
+            return new[] { trimmed, jpegCandidate, jpgCandidate };
         }
 
         private void SetWinnerPopupVisible(bool visible)
@@ -516,6 +702,11 @@ namespace FourWinsTikTok.UI
 
         private void SetActiveParticipantRow(VisualElement row)
         {
+            if (_activePulseRow == row)
+            {
+                return;
+            }
+
             StopActiveParticipantPulse();
             _activePulseRow = row;
             _activePulseRow.AddToClassList("active-turn");

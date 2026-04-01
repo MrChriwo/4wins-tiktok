@@ -53,6 +53,19 @@
     height: 68%;
 }
 
+.participants-grid {
+    width: 100%;
+    flex-direction: row-reverse;
+    align-items: flex-start;
+}
+
+.participants-column {
+    flex-direction: column;
+    align-items: center;
+    margin-left: 8px;
+    margin-right: 8px;
+}
+
 .participant-row {
     flex-direction: column;
     align-items: center;

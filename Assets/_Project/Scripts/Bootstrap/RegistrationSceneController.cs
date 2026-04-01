@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Text;
 using FourWinsTikTok.Gameplay;
 using FourWinsTikTok.TikTok;
 using TikTokLiveUnity;
@@ -6,6 +7,7 @@ using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
+using System.Collections.Generic;
 
 namespace FourWinsTikTok.Bootstrap
 {
@@ -27,6 +29,14 @@ namespace FourWinsTikTok.Bootstrap
         private AsyncOperation _preloadGameOperation;
         private bool _countdownFinished;
         private bool _isStartingGame;
+        private bool _registrationClosed;
+        private readonly List<TikTokLiveChatAdapter> _subscribedAdapters = new List<TikTokLiveChatAdapter>();
+        private float _nextAdapterResolveAt;
+        private VisualElement _participantsGrid;
+        private VisualElement _activeRegistrationColumn;
+        private int _activeRegistrationColumnCount;
+
+        private const int ParticipantsPerColumn = 4;
 
         private void OnEnable()
         {
@@ -37,15 +47,27 @@ namespace FourWinsTikTok.Bootstrap
                 return;
             }
 
-            if (tikTokAdapter == null)
+            TikTokLiveChatAdapter persistentAdapter = TikTokLiveChatAdapter.Instance;
+            if (persistentAdapter != null)
+            {
+                tikTokAdapter = persistentAdapter;
+            }
+            else if (tikTokAdapter == null)
             {
                 tikTokAdapter = FindFirstObjectByType<TikTokLiveChatAdapter>();
             }
 
             _registry = ParticipantRegistryService.EnsureInstance();
             _registry.ResetParticipants();
+            ParticipantSnapshotStore.Clear();
 
             _requiredGiftName = PlayerPrefs.GetString(BootstrapKeys.RegistrationGiftNamePlayerPrefsKey, "Rose").Trim();
+            if (string.IsNullOrWhiteSpace(_requiredGiftName))
+            {
+                _requiredGiftName = "Rose";
+                Debug.LogWarning("RegistrationSceneController: Registration gift was empty. Falling back to 'Rose'.");
+            }
+
             _remainingSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.RegistrationDurationSecondsPlayerPrefsKey, 20), 5, 600);
 
             VisualElement root = uiDocument.rootVisualElement;
@@ -68,14 +90,22 @@ namespace FourWinsTikTok.Bootstrap
             _startGameButton.clicked += HandleStartGameClicked;
             _countdownFinished = false;
             _isStartingGame = false;
+            _registrationClosed = false;
+            _nextAdapterResolveAt = Time.unscaledTime;
+            BuildParticipantsGrid();
+
+            Debug.Log($"RegistrationSceneController: Opened registration. RequiredGift='{_requiredGiftName}', Duration={_remainingSeconds:0}s.");
 
             if (tikTokAdapter != null)
             {
-                tikTokAdapter.OnGiftReceived += HandleGiftReceived;
-#if UNITY_EDITOR
-                tikTokAdapter.OnChatMessageReceived += HandleChatMessage;
-#endif
+                Debug.Log($"RegistrationSceneController: Adapter resolved. Connected={tikTokAdapter.IsConnected}, Connecting={tikTokAdapter.IsConnecting}.");
             }
+            else
+            {
+                Debug.LogWarning("RegistrationSceneController: TikTok adapter not found in registration scene.");
+            }
+
+            EnsureAdapterSubscription();
 
             _registry.OnParticipantRegistered += HandleParticipantRegistered;
             _registry.OnCleared += HandleParticipantsCleared;
@@ -83,15 +113,20 @@ namespace FourWinsTikTok.Bootstrap
             StartCoroutine(RegistrationCountdownRoutine());
         }
 
+        private void Update()
+        {
+            if (Time.unscaledTime < _nextAdapterResolveAt)
+            {
+                return;
+            }
+
+            _nextAdapterResolveAt = Time.unscaledTime + 1f;
+            EnsureAdapterSubscription();
+        }
+
         private void OnDisable()
         {
-            if (tikTokAdapter != null)
-            {
-                tikTokAdapter.OnGiftReceived -= HandleGiftReceived;
-#if UNITY_EDITOR
-                tikTokAdapter.OnChatMessageReceived -= HandleChatMessage;
-#endif
-            }
+            DetachAdapterSubscription();
 
             if (_registry != null)
             {
@@ -103,6 +138,114 @@ namespace FourWinsTikTok.Bootstrap
             {
                 _startGameButton.clicked -= HandleStartGameClicked;
             }
+        }
+
+        private void EnsureAdapterSubscription()
+        {
+            TikTokLiveChatAdapter[] adapters = FindObjectsByType<TikTokLiveChatAdapter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            tikTokAdapter = ResolvePreferredAdapter();
+
+            if (adapters.Length == 0)
+            {
+                Debug.LogWarning("RegistrationSceneController: Adapter still missing, waiting for resolve...");
+                DetachAdapterSubscription();
+                return;
+            }
+
+            for (int index = _subscribedAdapters.Count - 1; index >= 0; index--)
+            {
+                TikTokLiveChatAdapter existing = _subscribedAdapters[index];
+                if (existing == null || System.Array.IndexOf(adapters, existing) < 0)
+                {
+                    UnsubscribeAdapter(existing);
+                    _subscribedAdapters.RemoveAt(index);
+                }
+            }
+
+            for (int index = 0; index < adapters.Length; index++)
+            {
+                TikTokLiveChatAdapter adapter = adapters[index];
+                if (adapter == null || _subscribedAdapters.Contains(adapter))
+                {
+                    continue;
+                }
+
+                adapter.OnGiftReceived += HandleGiftReceived;
+#if UNITY_EDITOR
+                adapter.OnChatMessageReceived += HandleChatMessage;
+#endif
+                _subscribedAdapters.Add(adapter);
+            }
+
+            int connectedCount = 0;
+            for (int index = 0; index < _subscribedAdapters.Count; index++)
+            {
+                if (_subscribedAdapters[index] != null && _subscribedAdapters[index].IsConnected)
+                {
+                    connectedCount++;
+                }
+            }
+
+            Debug.Log($"RegistrationSceneController: Adapter subscriptions active={_subscribedAdapters.Count}, connected={connectedCount}, preferredConnected={tikTokAdapter != null && tikTokAdapter.IsConnected}.");
+        }
+
+        private TikTokLiveChatAdapter ResolvePreferredAdapter()
+        {
+            TikTokLiveChatAdapter[] adapters = FindObjectsByType<TikTokLiveChatAdapter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            TikTokLiveChatAdapter fallback = TikTokLiveChatAdapter.Instance;
+
+            for (int index = 0; index < adapters.Length; index++)
+            {
+                TikTokLiveChatAdapter candidate = adapters[index];
+                if (candidate != null && candidate.IsConnected)
+                {
+                    return candidate;
+                }
+            }
+
+            for (int index = 0; index < adapters.Length; index++)
+            {
+                TikTokLiveChatAdapter candidate = adapters[index];
+                if (candidate != null && candidate.IsConnecting)
+                {
+                    return candidate;
+                }
+            }
+
+            if (fallback != null)
+            {
+                return fallback;
+            }
+
+            return adapters.Length > 0 ? adapters[0] : null;
+        }
+
+        private void DetachAdapterSubscription()
+        {
+            if (_subscribedAdapters.Count == 0)
+            {
+                return;
+            }
+
+            for (int index = _subscribedAdapters.Count - 1; index >= 0; index--)
+            {
+                UnsubscribeAdapter(_subscribedAdapters[index]);
+            }
+
+            _subscribedAdapters.Clear();
+        }
+
+        private void UnsubscribeAdapter(TikTokLiveChatAdapter adapter)
+        {
+            if (adapter == null)
+            {
+                return;
+            }
+
+            adapter.OnGiftReceived -= HandleGiftReceived;
+#if UNITY_EDITOR
+            adapter.OnChatMessageReceived -= HandleChatMessage;
+#endif
         }
 
         private IEnumerator RegistrationCountdownRoutine()
@@ -122,9 +265,11 @@ namespace FourWinsTikTok.Bootstrap
 
             _timerLabel.text = "0";
             _countdownFinished = true;
+            _registrationClosed = true;
             _statusLabel.text = "Registration finished. Press Start Game.";
             _startGameButton.style.display = DisplayStyle.Flex;
             _startGameButton.SetEnabled(true);
+            Debug.Log($"RegistrationSceneController: Registration closed. Participants={_registry.Count}.");
         }
 
         private void HandleStartGameClicked()
@@ -163,6 +308,14 @@ namespace FourWinsTikTok.Bootstrap
 
         private void HandleGiftReceived(GiftMessage giftMessage)
         {
+            Debug.Log($"RegistrationSceneController: Gift event user='{giftMessage.UserId}', gift='{giftMessage.GiftName}', closed={_registrationClosed}, remaining={_remainingSeconds:0.0}s.");
+
+            if (_registrationClosed)
+            {
+                Debug.Log($"RegistrationSceneController: Ignored gift from '{giftMessage.UserId}' because registration is closed.");
+                return;
+            }
+
             string receivedGiftName = giftMessage.GiftName?.Trim();
             if (string.IsNullOrWhiteSpace(receivedGiftName))
             {
@@ -170,7 +323,7 @@ namespace FourWinsTikTok.Bootstrap
                 return;
             }
 
-            if (!string.Equals(receivedGiftName, _requiredGiftName, System.StringComparison.OrdinalIgnoreCase))
+            if (!IsRegistrationGiftMatch(receivedGiftName))
             {
                 Debug.Log($"RegistrationSceneController: Ignored gift '{receivedGiftName}'. Required='{_requiredGiftName}'.");
                 return;
@@ -187,9 +340,61 @@ namespace FourWinsTikTok.Bootstrap
             }
         }
 
+        private bool IsRegistrationGiftMatch(string receivedGiftName)
+        {
+            string requiredNormalized = NormalizeGiftName(_requiredGiftName);
+            string receivedNormalized = NormalizeGiftName(receivedGiftName);
+
+            if (string.IsNullOrWhiteSpace(requiredNormalized) || string.IsNullOrWhiteSpace(receivedNormalized))
+            {
+                return false;
+            }
+
+            if (string.Equals(requiredNormalized, receivedNormalized, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            bool fuzzyMatch = receivedNormalized.Contains(requiredNormalized, System.StringComparison.OrdinalIgnoreCase)
+                              || requiredNormalized.Contains(receivedNormalized, System.StringComparison.OrdinalIgnoreCase);
+
+            if (fuzzyMatch)
+            {
+                Debug.Log($"RegistrationSceneController: Fuzzy gift match Required='{_requiredGiftName}' ({requiredNormalized}), Received='{receivedGiftName}' ({receivedNormalized}).");
+            }
+
+            return fuzzyMatch;
+        }
+
+        private static string NormalizeGiftName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(value.Length);
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = char.ToLowerInvariant(value[index]);
+                if (char.IsLetterOrDigit(character))
+                {
+                    builder.Append(character);
+                }
+            }
+
+            return builder.ToString();
+        }
+
 #if UNITY_EDITOR
         private void HandleChatMessage(ChatMessage chatMessage)
         {
+            if (_registrationClosed)
+            {
+                Debug.Log($"RegistrationSceneController: Ignored chat register command from '{chatMessage.UserId}' because registration is closed.");
+                return;
+            }
+
             string sanitizedMessage = chatMessage.Message?.Trim();
             if (!string.Equals(chatMessage.UserId, "ichriwo", System.StringComparison.OrdinalIgnoreCase))
             {
@@ -213,11 +418,22 @@ namespace FourWinsTikTok.Bootstrap
 
         private void HandleParticipantsCleared()
         {
-            _participantsScroll.contentContainer.Clear();
+            ParticipantSnapshotStore.Clear();
+            BuildParticipantsGrid();
         }
 
         private void HandleParticipantRegistered(ParticipantInfo participant)
         {
+            EnsureParticipantsGrid();
+
+            if (_activeRegistrationColumn == null || _activeRegistrationColumnCount >= ParticipantsPerColumn)
+            {
+                _activeRegistrationColumn = new VisualElement();
+                _activeRegistrationColumn.AddToClassList("participants-column");
+                _participantsGrid.Insert(0, _activeRegistrationColumn);
+                _activeRegistrationColumnCount = 0;
+            }
+
             VisualElement row = new VisualElement();
             row.AddToClassList("participant-row");
 
@@ -229,8 +445,12 @@ namespace FourWinsTikTok.Bootstrap
             nameLabel.AddToClassList("participant-name");
             row.Add(nameLabel);
 
-            _participantsScroll.Add(row);
+            _activeRegistrationColumn.Add(row);
+            _activeRegistrationColumnCount++;
             row.schedule.Execute(() => row.AddToClassList("visible")).ExecuteLater(16);
+
+            ParticipantSnapshotStore.SaveFromRegistry(_registry);
+            Debug.Log($"RegistrationSceneController: Snapshot saved. Participants={_registry.Count}.");
 
             if (participant.AvatarPicture != null && TikTokLiveManager.Instance != null)
             {
@@ -250,28 +470,96 @@ namespace FourWinsTikTok.Bootstrap
             }
         }
 
+        private void EnsureParticipantsGrid()
+        {
+            if (_participantsGrid != null)
+            {
+                return;
+            }
+
+            BuildParticipantsGrid();
+        }
+
+        private void BuildParticipantsGrid()
+        {
+            _participantsScroll.contentContainer.Clear();
+
+            _participantsGrid = new VisualElement();
+            _participantsGrid.AddToClassList("participants-grid");
+            _participantsScroll.contentContainer.Add(_participantsGrid);
+
+            _activeRegistrationColumn = null;
+            _activeRegistrationColumnCount = 0;
+        }
+
         private IEnumerator LoadAvatarFromUrlRoutine(VisualElement avatarElement, string avatarUrl)
         {
-            using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(avatarUrl))
+            string[] candidates = BuildAvatarUrlCandidates(avatarUrl);
+            for (int index = 0; index < candidates.Length; index++)
             {
-                request.timeout = 10;
-                yield return request.SendWebRequest();
-
-                if (request.result != UnityWebRequest.Result.Success)
+                string candidate = candidates[index];
+                using (UnityWebRequest request = UnityWebRequestTexture.GetTexture(candidate))
                 {
+                    request.timeout = 10;
+                    yield return request.SendWebRequest();
+
+                    if (request.result != UnityWebRequest.Result.Success)
+                    {
+                        Debug.LogWarning($"RegistrationSceneController: Avatar download failed ({request.error}) for '{candidate}'.");
+                        continue;
+                    }
+
+                    byte[] imageBytes = request.downloadHandler.data;
+                    if (imageBytes == null || imageBytes.Length == 0)
+                    {
+                        Debug.LogWarning($"RegistrationSceneController: Avatar download returned empty body for '{candidate}'.");
+                        continue;
+                    }
+
+                    Texture2D texture = new Texture2D(2, 2, TextureFormat.RGBA32, false);
+                    bool loaded = texture.LoadImage(imageBytes, false);
+                    if (!loaded)
+                    {
+                        Destroy(texture);
+                        Debug.LogWarning($"RegistrationSceneController: Avatar texture decode failed for '{candidate}'.");
+                        continue;
+                    }
+
+                    avatarElement.style.backgroundImage = new StyleBackground(texture);
                     yield break;
                 }
-
-                Texture2D texture = DownloadHandlerTexture.GetContent(request);
-                if (texture == null)
-                {
-                    yield break;
-                }
-
-                Rect textureRect = new Rect(0f, 0f, texture.width, texture.height);
-                Sprite sprite = Sprite.Create(texture, textureRect, new Vector2(0.5f, 0.5f));
-                avatarElement.style.backgroundImage = new StyleBackground(sprite);
             }
+
+            Debug.LogWarning($"RegistrationSceneController: Avatar loading failed for all candidates derived from '{avatarUrl}'.");
+        }
+
+        private static string[] BuildAvatarUrlCandidates(string originalUrl)
+        {
+            if (string.IsNullOrWhiteSpace(originalUrl))
+            {
+                return new string[0];
+            }
+
+            string trimmed = originalUrl.Trim();
+            if (trimmed.Contains("/bridge/avatar?", System.StringComparison.OrdinalIgnoreCase))
+            {
+                return new[] { trimmed };
+            }
+
+            string lower = trimmed.ToLowerInvariant();
+            if (!lower.Contains(".webp"))
+            {
+                return new[] { trimmed };
+            }
+
+            string jpegCandidate = trimmed.Replace(".webp", ".jpeg");
+            string jpgCandidate = trimmed.Replace(".webp", ".jpg");
+            if (jpegCandidate == trimmed && jpgCandidate == trimmed)
+            {
+                return new[] { trimmed };
+            }
+
+            return new[] { trimmed, jpegCandidate, jpgCandidate };
         }
     }
 }

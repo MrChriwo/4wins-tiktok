@@ -16,6 +16,11 @@ namespace FourWinsTikTok.Gameplay
 
         public void StartCountdown(float durationSeconds)
         {
+            if (!this)
+            {
+                return;
+            }
+
             CancelCountdown();
 
             if (durationSeconds <= 0f)
@@ -31,6 +36,11 @@ namespace FourWinsTikTok.Gameplay
 
         public void CancelCountdown()
         {
+            if (!this)
+            {
+                return;
+            }
+
             if (_countdownRoutine != null)
             {
                 StopCoroutine(_countdownRoutine);
@@ -45,14 +55,12 @@ namespace FourWinsTikTok.Gameplay
         {
             IsRunning = true;
             RemainingTime = durationSeconds;
+            float endTime = Time.realtimeSinceStartup + durationSeconds;
+            OnTick?.Invoke(RemainingTime);
 
             while (RemainingTime > 0f)
             {
-                RemainingTime -= Time.deltaTime;
-                if (RemainingTime < 0f)
-                {
-                    RemainingTime = 0f;
-                }
+                RemainingTime = Mathf.Max(0f, endTime - Time.realtimeSinceStartup);
 
                 OnTick?.Invoke(RemainingTime);
                 yield return null;

@@ -1,17 +1,23 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Text.RegularExpressions;
 using FourWinsTikTok.AI;
 using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
 using FourWinsTikTok.Core;
 using FourWinsTikTok.TikTok;
+using FourWinsTikTok.World;
 using UnityEngine;
 
 namespace FourWinsTikTok.Gameplay
 {
     public class GameFlowController : MonoBehaviour
     {
+        public static GameFlowController Instance { get; private set; }
+
+        private static readonly Regex ColumnCommandRegex = new Regex(@"(?:^|\s|\(|\[|\{|#)([1-7])(?:$|\s|\)|\]|\}|[\.,!?:;])", RegexOptions.Compiled);
+
         [Header("Config")]
         [SerializeField] private ConnectFourGameConfig gameConfig;
         [SerializeField, Min(5f)] private float communityParticipantTurnSeconds = 60f;
@@ -25,6 +31,7 @@ namespace FourWinsTikTok.Gameplay
 
         [Header("Debug")]
         [SerializeField] private bool logVoteFlow = true;
+        [SerializeField] private bool ensureWorldBoardView = true;
 
         public event Action<int, int> OnBoardInitialized;
         public event Action<BoardState> OnBoardChanged;
@@ -42,15 +49,22 @@ namespace FourWinsTikTok.Gameplay
         private IBotPlayer _botPlayer;
         private ParticipantRegistryService _participantRegistry;
         private Coroutine _botTurnRoutine;
+        private TurnTimer _subscribedTurnTimer;
+        private TikTokLiveChatAdapter _subscribedChatAdapter;
+        private readonly List<TikTokLiveChatAdapter> _subscribedChatAdapters = new List<TikTokLiveChatAdapter>();
         private readonly List<ParticipantInfo> _communityTurnParticipants = new List<ParticipantInfo>();
         private int _activeCommunityParticipantIndex = -1;
         private string _activeCommunityParticipantUserId = string.Empty;
+        private Coroutine _awaitParticipantsRoutine;
         private int _currentRound = 1;
         private int _communityWins;
         private int _opponentWins;
         private bool _matchOver;
         private int _matchWinsRequired = 5;
         private float _participantTurnSecondsRuntime = 60f;
+        private float _nextRuntimeReconcileAt;
+        private float _communityTurnDeadlineRealtime;
+        private float _lastHandledCommunityTimeoutRealtime = -10f;
 
         public BoardState CurrentBoard { get; private set; }
         public GameFlowState CurrentState { get; private set; } = GameFlowState.Idle;
@@ -60,49 +74,231 @@ namespace FourWinsTikTok.Gameplay
         public int OpponentWins => _opponentWins;
         public bool IsMatchOver => _matchOver;
         public int MatchWinsRequired => _matchWinsRequired;
+        public string ActiveCommunityParticipantUserId => _activeCommunityParticipantUserId;
+        public float CommunityTurnRemainingSeconds
+        {
+            get
+            {
+                if (CurrentState != GameFlowState.WaitingForCommunityVote)
+                {
+                    return 0f;
+                }
+
+                if (_communityTurnDeadlineRealtime > 0f)
+                {
+                    return Mathf.Max(0f, _communityTurnDeadlineRealtime - Time.realtimeSinceStartup);
+                }
+
+                return EnsureTurnTimer() != null ? turnTimer.RemainingTime : 0f;
+            }
+        }
 
         private void Awake()
         {
+            if (Instance != null && Instance != this)
+            {
+                Debug.LogWarning("GameFlowController: Duplicate instance detected. Destroying newer instance.");
+                Destroy(gameObject);
+                return;
+            }
+
+            Instance = this;
+
             if (turnTimer == null)
             {
                 turnTimer = GetComponent<TurnTimer>();
+                if (turnTimer == null)
+                {
+                    turnTimer = gameObject.AddComponent<TurnTimer>();
+                    Debug.LogWarning("GameFlowController: TurnTimer reference missing. Added TurnTimer component at runtime.");
+                }
+            }
+
+            EnsureWorldBoardViewExists();
+        }
+
+        private void EnsureWorldBoardViewExists()
+        {
+            if (!ensureWorldBoardView)
+            {
+                return;
+            }
+
+            ConnectFourWorldBoardView existingWorldView = FindFirstObjectByType<ConnectFourWorldBoardView>();
+            if (existingWorldView != null)
+            {
+                existingWorldView.ConfigureRuntime(this);
+                return;
+            }
+
+            ConnectFourWorldBoardView runtimeWorldView = gameObject.AddComponent<ConnectFourWorldBoardView>();
+            runtimeWorldView.ConfigureRuntime(this);
+            if (logVoteFlow)
+            {
+                Debug.Log("[TRACE][GameFlow] Auto-created ConnectFourWorldBoardView on GameRoot.");
             }
         }
 
         private void OnEnable()
         {
-            if (turnTimer != null)
-            {
-                turnTimer.OnTick += HandleTimerTick;
-                turnTimer.OnCompleted += HandleCommunityTimerCompleted;
-            }
+            ResolveChatAdapterReference();
+            _participantRegistry = ParticipantRegistryService.EnsureInstance();
+            EnsureTurnTimer();
+            EnsureChatAdapterSubscription();
 
-            if (chatAdapter != null)
+            if (_participantRegistry != null)
             {
-                chatAdapter.OnChatMessageReceived += HandleChatMessage;
+                _participantRegistry.OnParticipantRegistered += HandleParticipantRegistered;
+                _participantRegistry.OnCleared += HandleParticipantsCleared;
             }
         }
 
         private void Start()
         {
-            if (gameConfig != null && gameConfig.AutoStartOnPlay)
+            if (CurrentBoard == null)
             {
                 StartNewGame();
             }
         }
 
-        private void OnDisable()
+        private void Update()
         {
-            if (turnTimer != null)
+            if (!isActiveAndEnabled || Time.unscaledTime < _nextRuntimeReconcileAt)
             {
-                turnTimer.OnTick -= HandleTimerTick;
-                turnTimer.OnCompleted -= HandleCommunityTimerCompleted;
+                return;
             }
 
-            if (chatAdapter != null)
+            _nextRuntimeReconcileAt = Time.unscaledTime + 0.5f;
+            ReconcileRuntimeBindings();
+            TickCommunityTurnDeadline();
+        }
+
+        private void OnDisable()
+        {
+            DetachTurnTimerEvents();
+            DetachChatAdapterEvents();
+
+            if (_participantRegistry != null)
             {
-                chatAdapter.OnChatMessageReceived -= HandleChatMessage;
+                _participantRegistry.OnParticipantRegistered -= HandleParticipantRegistered;
+                _participantRegistry.OnCleared -= HandleParticipantsCleared;
             }
+
+            StopAwaitParticipantsRoutine();
+
+            if (Instance == this)
+            {
+                Instance = null;
+            }
+        }
+
+        private void ResolveChatAdapterReference()
+        {
+            chatAdapter = ResolvePreferredChatAdapter();
+
+            if (chatAdapter != null && _subscribedChatAdapter != chatAdapter)
+            {
+                Trace("ResolveChatAdapterReference: adapter resolved/replaced.");
+            }
+        }
+
+        private static TikTokLiveChatAdapter ResolvePreferredChatAdapter()
+        {
+            TikTokLiveChatAdapter[] adapters = FindObjectsByType<TikTokLiveChatAdapter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            TikTokLiveChatAdapter fallback = TikTokLiveChatAdapter.Instance;
+
+            for (int index = 0; index < adapters.Length; index++)
+            {
+                TikTokLiveChatAdapter candidate = adapters[index];
+                if (candidate != null && candidate.IsConnected)
+                {
+                    return candidate;
+                }
+            }
+
+            for (int index = 0; index < adapters.Length; index++)
+            {
+                TikTokLiveChatAdapter candidate = adapters[index];
+                if (candidate != null && candidate.IsConnecting)
+                {
+                    return candidate;
+                }
+            }
+
+            if (fallback != null)
+            {
+                return fallback;
+            }
+
+            return adapters.Length > 0 ? adapters[0] : null;
+        }
+
+        private void ReconcileRuntimeBindings()
+        {
+            EnsureTurnTimer();
+            EnsureChatAdapterSubscription();
+
+            if (CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            if (_communityTurnParticipants.Count == 0)
+            {
+                RefreshCommunityParticipants();
+            }
+
+            if (string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId))
+            {
+                if (_communityTurnParticipants.Count > 0)
+                {
+                    AdvanceToNextCommunityParticipant();
+                }
+
+                return;
+            }
+
+            TurnTimer timer = EnsureTurnTimer();
+            if (timer == null)
+            {
+                return;
+            }
+
+            float remaining = CommunityTurnRemainingSeconds;
+            if (remaining <= 0.01f)
+            {
+                HandleCommunityTimerCompleted();
+                return;
+            }
+
+            if (timer.IsRunning)
+            {
+                return;
+            }
+
+            timer.StartCountdown(remaining);
+            OnTimerChanged?.Invoke(remaining);
+            Debug.LogWarning($"GameFlowController: Recovered stopped timer for active participant '{_activeCommunityParticipantUserId}'.");
+        }
+
+        private void TickCommunityTurnDeadline()
+        {
+            if (CurrentState != GameFlowState.WaitingForCommunityVote || string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId))
+            {
+                return;
+            }
+
+            if (_communityTurnDeadlineRealtime <= 0f)
+            {
+                return;
+            }
+
+            if (Time.realtimeSinceStartup < _communityTurnDeadlineRealtime)
+            {
+                return;
+            }
+
+            HandleCommunityTimerCompleted();
         }
 
         public void StartNewGame()
@@ -118,9 +314,11 @@ namespace FourWinsTikTok.Gameplay
                 _botTurnRoutine = null;
             }
 
-            turnTimer.CancelCountdown();
+            EnsureTurnTimer()?.CancelCountdown();
 
             _participantRegistry = ParticipantRegistryService.EnsureInstance();
+            HydrateParticipantsFromSnapshotIfNeeded();
+            Trace($"StartNewGame: registryCount={_participantRegistry?.Count ?? 0}");
             if (!useLocalStreamerInsteadOfBot)
             {
                 _botPlayer = new RandomBotPlayer(_random);
@@ -141,6 +339,8 @@ namespace FourWinsTikTok.Gameplay
             _matchOver = false;
             _activeCommunityParticipantIndex = -1;
             _activeCommunityParticipantUserId = string.Empty;
+            _communityTurnDeadlineRealtime = 0f;
+            StopAwaitParticipantsRoutine();
 
             SetState(GameFlowState.Idle);
             ActivePlayer = PlayerSide.None;
@@ -170,8 +370,9 @@ namespace FourWinsTikTok.Gameplay
                 _botTurnRoutine = null;
             }
 
-            turnTimer.CancelCountdown();
+            EnsureTurnTimer()?.CancelCountdown();
             _currentRound++;
+            _communityTurnDeadlineRealtime = 0f;
 
             SetState(GameFlowState.Idle);
             ActivePlayer = PlayerSide.None;
@@ -190,13 +391,162 @@ namespace FourWinsTikTok.Gameplay
                 return false;
             }
 
-            if (turnTimer == null)
+            if (EnsureTurnTimer() == null)
             {
-                Debug.LogError("GameFlowController: Missing TurnTimer reference.");
+                Debug.LogError("GameFlowController: TurnTimer could not be resolved.");
                 return false;
             }
 
+            ResolveChatAdapterReference();
+            if (EnsureChatAdapterSubscription() == null)
+            {
+                Debug.LogWarning("GameFlowController: TikTokLiveChatAdapter not resolved. Chat moves will be unavailable.");
+            }
+
             return true;
+        }
+
+        private void HydrateParticipantsFromSnapshotIfNeeded()
+        {
+            if (_participantRegistry == null || _participantRegistry.Count > 0)
+            {
+                return;
+            }
+
+            IReadOnlyList<ParticipantSnapshotEntry> snapshot = ParticipantSnapshotStore.Load();
+            if (snapshot == null || snapshot.Count == 0)
+            {
+                return;
+            }
+
+            for (int index = 0; index < snapshot.Count; index++)
+            {
+                ParticipantSnapshotEntry entry = snapshot[index];
+                if (entry == null || string.IsNullOrWhiteSpace(entry.userId))
+                {
+                    continue;
+                }
+
+                string displayName = string.IsNullOrWhiteSpace(entry.displayName)
+                    ? entry.userId
+                    : entry.displayName;
+
+                _participantRegistry.TryRegisterParticipant(entry.userId, displayName, null, entry.avatarUrl, out _);
+            }
+        }
+
+        private TurnTimer EnsureTurnTimer()
+        {
+            if (!this)
+            {
+                return null;
+            }
+
+            if (turnTimer == null)
+            {
+                turnTimer = GetComponent<TurnTimer>();
+                if (turnTimer == null)
+                {
+                    turnTimer = gameObject.AddComponent<TurnTimer>();
+                    Debug.LogWarning("GameFlowController: Missing TurnTimer reference. Added TurnTimer component at runtime.");
+                }
+            }
+
+            if (_subscribedTurnTimer != turnTimer)
+            {
+                DetachTurnTimerEvents();
+                if (turnTimer != null)
+                {
+                    turnTimer.OnTick += HandleTimerTick;
+                    turnTimer.OnCompleted += HandleCommunityTimerCompleted;
+                    _subscribedTurnTimer = turnTimer;
+                }
+            }
+
+            return turnTimer;
+        }
+
+        private TikTokLiveChatAdapter EnsureChatAdapterSubscription()
+        {
+            if (!this)
+            {
+                return null;
+            }
+
+            ResolveChatAdapterReference();
+
+            TikTokLiveChatAdapter[] adapters = FindObjectsByType<TikTokLiveChatAdapter>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+
+            for (int index = _subscribedChatAdapters.Count - 1; index >= 0; index--)
+            {
+                TikTokLiveChatAdapter existing = _subscribedChatAdapters[index];
+                if (existing == null || System.Array.IndexOf(adapters, existing) < 0)
+                {
+                    existing.OnChatMessageReceived -= HandleChatMessage;
+                    _subscribedChatAdapters.RemoveAt(index);
+                }
+            }
+
+            for (int index = 0; index < adapters.Length; index++)
+            {
+                TikTokLiveChatAdapter adapter = adapters[index];
+                if (adapter == null || _subscribedChatAdapters.Contains(adapter))
+                {
+                    continue;
+                }
+
+                adapter.OnChatMessageReceived += HandleChatMessage;
+                _subscribedChatAdapters.Add(adapter);
+            }
+
+            if (_subscribedChatAdapter != chatAdapter)
+            {
+                _subscribedChatAdapter = chatAdapter;
+            }
+
+            if (logVoteFlow)
+            {
+                int connectedCount = 0;
+                for (int index = 0; index < _subscribedChatAdapters.Count; index++)
+                {
+                    if (_subscribedChatAdapters[index] != null && _subscribedChatAdapters[index].IsConnected)
+                    {
+                        connectedCount++;
+                    }
+                }
+
+                Trace($"ChatAdapterSubscribed: total={_subscribedChatAdapters.Count}, connected={connectedCount}");
+            }
+
+            return chatAdapter;
+        }
+
+        private void DetachTurnTimerEvents()
+        {
+            if (_subscribedTurnTimer == null)
+            {
+                return;
+            }
+
+            _subscribedTurnTimer.OnTick -= HandleTimerTick;
+            _subscribedTurnTimer.OnCompleted -= HandleCommunityTimerCompleted;
+            _subscribedTurnTimer = null;
+        }
+
+        private void DetachChatAdapterEvents()
+        {
+            for (int index = _subscribedChatAdapters.Count - 1; index >= 0; index--)
+            {
+                TikTokLiveChatAdapter adapter = _subscribedChatAdapters[index];
+                if (adapter != null)
+                {
+                    adapter.OnChatMessageReceived -= HandleChatMessage;
+                }
+            }
+
+            _subscribedChatAdapters.Clear();
+            Trace("ChatAdapterUnsubscribed");
+            _subscribedChatAdapter = null;
         }
 
         private void InitializeBoardForRound()
@@ -217,6 +567,7 @@ namespace FourWinsTikTok.Gameplay
         {
             if (CurrentBoard == null)
             {
+                Debug.LogWarning("GameFlowController: BeginCommunityTurn called with null board.");
                 return;
             }
 
@@ -227,26 +578,135 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
-            _communityTurnParticipants.Clear();
-            if (_participantRegistry != null)
+            RefreshCommunityParticipants();
+            if (_communityTurnParticipants.Count == 0)
             {
-                foreach (ParticipantInfo participant in _participantRegistry.Participants)
-                {
-                    _communityTurnParticipants.Add(participant);
-                }
+                HydrateParticipantsFromSnapshotIfNeeded();
+                RefreshCommunityParticipants();
+            }
+
+            Trace($"BeginCommunityTurn: participants={_communityTurnParticipants.Count}");
+            if (_communityTurnParticipants.Count > 0)
+            {
+                Trace($"BeginCommunityTurnParticipants: {BuildParticipantSummary(_communityTurnParticipants)}");
             }
 
             if (_communityTurnParticipants.Count == 0)
             {
-                EndAsDraw();
+                SetState(GameFlowState.WaitingForCommunityVote);
+                ActivePlayer = PlayerSide.Community;
+                _activeCommunityParticipantUserId = string.Empty;
+                _communityTurnDeadlineRealtime = 0f;
+                OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
+                OnTimerChanged?.Invoke(0f);
+                OnStatusMessage?.Invoke("No participants registered yet. Waiting for participants...");
+                StartAwaitParticipantsRoutine();
+                Trace("BeginCommunityTurn: waiting for participants, timer stays at 0");
                 return;
             }
 
+            StopAwaitParticipantsRoutine();
             ActivePlayer = PlayerSide.Community;
             OnVoteUpdated?.Invoke(Array.Empty<Voting.VoteTally>());
 
             SetState(GameFlowState.WaitingForCommunityVote);
+            Debug.Log($"GameFlowController: BeginCommunityTurn with {_communityTurnParticipants.Count} participant(s).");
             AdvanceToNextCommunityParticipant();
+        }
+
+        private void RefreshCommunityParticipants()
+        {
+            _communityTurnParticipants.Clear();
+            if (_participantRegistry == null)
+            {
+                return;
+            }
+
+            foreach (ParticipantInfo participant in _participantRegistry.Participants)
+            {
+                _communityTurnParticipants.Add(participant);
+            }
+        }
+
+        private void HandleParticipantRegistered(ParticipantInfo _)
+        {
+            if (CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId))
+            {
+                return;
+            }
+
+            RefreshCommunityParticipants();
+            if (_communityTurnParticipants.Count == 0)
+            {
+                return;
+            }
+
+            _activeCommunityParticipantIndex = -1;
+            StopAwaitParticipantsRoutine();
+            AdvanceToNextCommunityParticipant();
+        }
+
+        private void HandleParticipantsCleared()
+        {
+            if (CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            _communityTurnParticipants.Clear();
+            _activeCommunityParticipantIndex = -1;
+            _activeCommunityParticipantUserId = string.Empty;
+            _communityTurnDeadlineRealtime = 0f;
+            OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
+            OnTimerChanged?.Invoke(0f);
+            StartAwaitParticipantsRoutine();
+        }
+
+        private void StartAwaitParticipantsRoutine()
+        {
+            if (_awaitParticipantsRoutine != null)
+            {
+                return;
+            }
+
+            _awaitParticipantsRoutine = StartCoroutine(AwaitParticipantsRoutine());
+        }
+
+        private void StopAwaitParticipantsRoutine()
+        {
+            if (_awaitParticipantsRoutine == null)
+            {
+                return;
+            }
+
+            StopCoroutine(_awaitParticipantsRoutine);
+            _awaitParticipantsRoutine = null;
+        }
+
+        private IEnumerator AwaitParticipantsRoutine()
+        {
+            WaitForSecondsRealtime wait = new WaitForSecondsRealtime(0.5f);
+
+            while (CurrentState == GameFlowState.WaitingForCommunityVote && string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId))
+            {
+                RefreshCommunityParticipants();
+                if (_communityTurnParticipants.Count > 0)
+                {
+                    _activeCommunityParticipantIndex = -1;
+                    AdvanceToNextCommunityParticipant();
+                    _awaitParticipantsRoutine = null;
+                    yield break;
+                }
+
+                yield return wait;
+            }
+
+            _awaitParticipantsRoutine = null;
         }
 
         private void HandleTimerTick(float remainingSeconds)
@@ -259,6 +719,18 @@ namespace FourWinsTikTok.Gameplay
 
         private void HandleChatMessage(ChatMessage chatMessage)
         {
+            if (!this || !isActiveAndEnabled)
+            {
+                return;
+            }
+
+            if (CurrentBoard == null)
+            {
+                return;
+            }
+
+            ResolveChatAdapterReference();
+
             string sanitizedMessage = chatMessage.Message?.Trim();
 
 #if UNITY_EDITOR
@@ -270,7 +742,7 @@ namespace FourWinsTikTok.Gameplay
 
             if (logVoteFlow)
             {
-                Debug.Log($"GameFlowController: Chat received user='{chatMessage.UserId}', message='{sanitizedMessage}', state='{CurrentState}'.");
+                Debug.Log($"GameFlowController: Chat received user='{chatMessage.UserId}', message='{sanitizedMessage}', state='{CurrentState}', active='{_activeCommunityParticipantUserId}', participants={_communityTurnParticipants.Count}, remaining={CommunityTurnRemainingSeconds:0.0}s.");
             }
 
             if (CurrentState != GameFlowState.WaitingForCommunityVote)
@@ -283,7 +755,37 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
-            if (!string.Equals(chatMessage.UserId, _activeCommunityParticipantUserId, StringComparison.OrdinalIgnoreCase))
+            if (_communityTurnParticipants.Count == 0)
+            {
+                RefreshCommunityParticipants();
+                if (_communityTurnParticipants.Count == 0 && TryParseColumnFromChat(sanitizedMessage, out _))
+                {
+                    Trace($"AutoRegisterFromChat: user='{chatMessage.UserId}'");
+                    EnsureParticipantExistsForChatMessage(chatMessage);
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId) && _communityTurnParticipants.Count > 0)
+            {
+                int participantIndex = _communityTurnParticipants.FindIndex(participant =>
+                    IsMatchingParticipant(participant, chatMessage));
+
+                if (participantIndex < 0 && TryParseColumnFromChat(sanitizedMessage, out _))
+                {
+                    EnsureParticipantExistsForChatMessage(chatMessage);
+                    RefreshCommunityParticipants();
+
+                    participantIndex = _communityTurnParticipants.FindIndex(participant =>
+                        IsMatchingParticipant(participant, chatMessage));
+                }
+
+                if (participantIndex >= 0)
+                {
+                    ActivateCommunityParticipant(participantIndex, _participantTurnSecondsRuntime);
+                }
+            }
+
+            if (!IsSameUserId(chatMessage.UserId, _activeCommunityParticipantUserId))
             {
                 if (logVoteFlow)
                 {
@@ -293,7 +795,7 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
-            if (sanitizedMessage is not ("1" or "2" or "3" or "4" or "5" or "6" or "7"))
+            if (!TryParseColumnFromChat(sanitizedMessage, out int selectedColumn))
             {
                 if (logVoteFlow)
                 {
@@ -303,7 +805,6 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
-            int selectedColumn = int.Parse(sanitizedMessage) - 1;
             if (CurrentBoard.IsColumnFull(selectedColumn))
             {
                 if (logVoteFlow)
@@ -316,12 +817,15 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
-            turnTimer.CancelCountdown();
+            EnsureTurnTimer()?.CancelCountdown();
+            _communityTurnDeadlineRealtime = 0f;
             if (!TryExecuteMove(selectedColumn, PlayerSide.Community))
             {
                 EndAsDraw();
                 return;
             }
+
+            Trace($"CommunityMoveAccepted: user='{chatMessage.UserId}', column={selectedColumn + 1}");
 
             _activeCommunityParticipantUserId = string.Empty;
             OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
@@ -339,10 +843,67 @@ namespace FourWinsTikTok.Gameplay
             }
         }
 
+        private void EnsureParticipantExistsForChatMessage(ChatMessage chatMessage)
+        {
+            _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
+            if (_participantRegistry == null)
+            {
+                return;
+            }
+
+            string userId = chatMessage.UserId?.Trim();
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return;
+            }
+
+            string displayName = string.IsNullOrWhiteSpace(chatMessage.DisplayName)
+                ? userId
+                : chatMessage.DisplayName;
+
+            _participantRegistry.TryRegisterParticipant(userId, displayName, chatMessage.AvatarPicture, chatMessage.AvatarUrl, out _);
+            RefreshCommunityParticipants();
+        }
+
+        private void ActivateCommunityParticipant(int participantIndex, float turnDurationSeconds)
+        {
+            if (participantIndex < 0 || participantIndex >= _communityTurnParticipants.Count)
+            {
+                return;
+            }
+
+            _activeCommunityParticipantIndex = participantIndex;
+            _activeCommunityParticipantUserId = _communityTurnParticipants[participantIndex].UserId;
+            OnCommunityParticipantTurnChanged?.Invoke(_activeCommunityParticipantUserId);
+            StartCommunityParticipantCountdown(turnDurationSeconds);
+        }
+
+        private static bool IsMatchingParticipant(ParticipantInfo participant, ChatMessage chatMessage)
+        {
+            if (participant == null)
+            {
+                return false;
+            }
+
+            if (IsSameUserId(participant.UserId, chatMessage.UserId))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrWhiteSpace(chatMessage.DisplayName)
+                && !string.IsNullOrWhiteSpace(participant.DisplayName)
+                && string.Equals(participant.DisplayName.Trim(), chatMessage.DisplayName.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
 #if UNITY_EDITOR
         private bool TryHandleEditorAdminCommand(ChatMessage chatMessage, string sanitizedMessage)
         {
-            if (!string.Equals(chatMessage.UserId, "ichriwo", StringComparison.OrdinalIgnoreCase))
+            if (!IsSameUserId(chatMessage.UserId, "ichriwo"))
             {
                 return false;
             }
@@ -373,7 +934,7 @@ namespace FourWinsTikTok.Gameplay
                     _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
 
                     ParticipantInfo takeoverParticipant = _communityTurnParticipants.Find(participant =>
-                        string.Equals(participant.UserId, chatMessage.UserId, StringComparison.OrdinalIgnoreCase));
+                        IsSameUserId(participant.UserId, chatMessage.UserId));
 
                     if (takeoverParticipant == null)
                     {
@@ -401,15 +962,12 @@ namespace FourWinsTikTok.Gameplay
                     }
 
                     int takeoverIndex = _communityTurnParticipants.FindIndex(participant =>
-                        string.Equals(participant.UserId, chatMessage.UserId, StringComparison.OrdinalIgnoreCase));
+                        IsSameUserId(participant.UserId, chatMessage.UserId));
 
                     if (takeoverIndex >= 0)
                     {
-                        _activeCommunityParticipantIndex = takeoverIndex;
-                        _activeCommunityParticipantUserId = chatMessage.UserId;
-                        turnTimer.CancelCountdown();
-                        turnTimer.StartCountdown(_participantTurnSecondsRuntime);
-                        OnCommunityParticipantTurnChanged?.Invoke(_activeCommunityParticipantUserId);
+                        EnsureTurnTimer()?.CancelCountdown();
+                        ActivateCommunityParticipant(takeoverIndex, _participantTurnSecondsRuntime);
                         OnStatusMessage?.Invoke("Admin takeover: ichriwo is up now.");
                     }
                 }
@@ -426,6 +984,24 @@ namespace FourWinsTikTok.Gameplay
             if (CurrentState != GameFlowState.WaitingForCommunityVote || CurrentBoard == null)
             {
                 return;
+            }
+
+            if (Time.realtimeSinceStartup - _lastHandledCommunityTimeoutRealtime < 0.05f)
+            {
+                return;
+            }
+
+            _lastHandledCommunityTimeoutRealtime = Time.realtimeSinceStartup;
+            _communityTurnDeadlineRealtime = 0f;
+
+            if (_communityTurnParticipants.Count == 0)
+            {
+                RefreshCommunityParticipants();
+                if (_communityTurnParticipants.Count == 0)
+                {
+                    OnTimerChanged?.Invoke(0f);
+                    return;
+                }
             }
 
             AdvanceToNextCommunityParticipant();
@@ -481,6 +1057,150 @@ namespace FourWinsTikTok.Gameplay
             return true;
         }
 
+        private static bool TryParseColumnFromChat(string message, out int columnIndex)
+        {
+            columnIndex = -1;
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                return false;
+            }
+
+            string sanitized = NormalizeChatMessageForColumnParsing(message);
+            if (sanitized.Length == 1 && sanitized[0] >= '1' && sanitized[0] <= '7')
+            {
+                columnIndex = sanitized[0] - '1';
+                return true;
+            }
+
+            Match match = ColumnCommandRegex.Match(sanitized);
+            if (!match.Success)
+            {
+                return false;
+            }
+
+            if (!int.TryParse(match.Groups[1].Value, out int displayColumn))
+            {
+                return false;
+            }
+
+            columnIndex = displayColumn - 1;
+            return columnIndex >= 0 && columnIndex <= 6;
+        }
+
+        private static string NormalizeChatMessageForColumnParsing(string message)
+        {
+            string trimmed = message.Trim();
+            if (trimmed.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            char[] normalizedChars = trimmed.ToCharArray();
+            for (int index = 0; index < normalizedChars.Length; index++)
+            {
+                char character = normalizedChars[index];
+                if (character >= '１' && character <= '７')
+                {
+                    normalizedChars[index] = (char)('1' + (character - '１'));
+                }
+                else if (character >= '0' && character <= '9')
+                {
+                    normalizedChars[index] = character;
+                }
+            }
+
+            return new string(normalizedChars)
+                .Replace("1️⃣", "1")
+                .Replace("2️⃣", "2")
+                .Replace("3️⃣", "3")
+                .Replace("4️⃣", "4")
+                .Replace("5️⃣", "5")
+                .Replace("6️⃣", "6")
+                .Replace("7️⃣", "7");
+        }
+
+        private void StartCommunityParticipantCountdown(float durationSeconds)
+        {
+            float clampedDuration = Mathf.Max(0f, durationSeconds);
+            _communityTurnDeadlineRealtime = clampedDuration > 0f
+                ? Time.realtimeSinceStartup + clampedDuration
+                : 0f;
+
+            EnsureTurnTimer()?.StartCountdown(clampedDuration);
+            OnTimerChanged?.Invoke(clampedDuration);
+            Trace($"ParticipantTurnStart: user='{_activeCommunityParticipantUserId}', duration={clampedDuration:0.0}s");
+        }
+
+        private static string BuildParticipantSummary(IReadOnlyList<ParticipantInfo> participants)
+        {
+            if (participants == null || participants.Count == 0)
+            {
+                return "none";
+            }
+
+            int limit = Mathf.Min(8, participants.Count);
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+            for (int index = 0; index < limit; index++)
+            {
+                ParticipantInfo participant = participants[index];
+                if (participant == null)
+                {
+                    continue;
+                }
+
+                if (builder.Length > 0)
+                {
+                    builder.Append(", ");
+                }
+
+                builder.Append(string.IsNullOrWhiteSpace(participant.DisplayName) ? participant.UserId : participant.DisplayName);
+                builder.Append("(");
+                builder.Append(participant.UserId);
+                builder.Append(")");
+            }
+
+            if (participants.Count > limit)
+            {
+                builder.Append($", ... +{participants.Count - limit}");
+            }
+
+            return builder.ToString();
+        }
+
+        private void Trace(string message)
+        {
+            if (!logVoteFlow)
+            {
+                return;
+            }
+
+            Debug.Log($"[TRACE][GameFlow] {message}");
+        }
+
+        private static string NormalizeUserIdForComparison(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return string.Empty;
+            }
+
+            string normalized = userId.Trim();
+            if (normalized.StartsWith("@", StringComparison.Ordinal))
+            {
+                normalized = normalized.Substring(1);
+            }
+
+            return normalized;
+        }
+
+        private static bool IsSameUserId(string left, string right)
+        {
+            return string.Equals(
+                NormalizeUserIdForComparison(left),
+                NormalizeUserIdForComparison(right),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
         private void AdvanceToNextCommunityParticipant()
         {
             if (_communityTurnParticipants.Count == 0)
@@ -504,7 +1224,8 @@ namespace FourWinsTikTok.Gameplay
 
             OnCommunityParticipantTurnChanged?.Invoke(_activeCommunityParticipantUserId);
             OnStatusMessage?.Invoke($"{displayName} is up! Send 1-7 in {Mathf.RoundToInt(_participantTurnSecondsRuntime)}s.");
-            turnTimer.StartCountdown(_participantTurnSecondsRuntime);
+            StartCommunityParticipantCountdown(_participantTurnSecondsRuntime);
+            Debug.Log($"GameFlowController: Active participant='{_activeCommunityParticipantUserId}', timer={_participantTurnSecondsRuntime}s.");
         }
 
         private void BeginBotTurn()
@@ -557,6 +1278,7 @@ namespace FourWinsTikTok.Gameplay
             SetState(GameFlowState.WaitingForStreamerMove);
             ActivePlayer = PlayerSide.Streamer;
             _activeCommunityParticipantUserId = string.Empty;
+            _communityTurnDeadlineRealtime = 0f;
             OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
             OnStatusMessage?.Invoke("Streamer turn: click a column or press 1-7.");
             OnTimerChanged?.Invoke(0f);
@@ -614,7 +1336,8 @@ namespace FourWinsTikTok.Gameplay
         {
             SetState(GameFlowState.GameOver);
             ActivePlayer = PlayerSide.None;
-            turnTimer.CancelCountdown();
+            EnsureTurnTimer()?.CancelCountdown();
+            _communityTurnDeadlineRealtime = 0f;
             OnStatusMessage?.Invoke("Draw!");
             OnGameOver?.Invoke(PlayerSide.None);
             PublishScoreState();
@@ -623,6 +1346,11 @@ namespace FourWinsTikTok.Gameplay
 
         private void SetState(GameFlowState state)
         {
+            if (CurrentState != state)
+            {
+                Trace($"StateChange: {CurrentState} -> {state}");
+            }
+
             CurrentState = state;
             OnStateChanged?.Invoke(state);
         }

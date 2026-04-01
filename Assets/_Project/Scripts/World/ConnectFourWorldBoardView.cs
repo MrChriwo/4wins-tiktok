@@ -20,6 +20,15 @@ namespace FourWinsTikTok.World
         private int _columns;
         private int _rows;
 
+        public void ConfigureRuntime(GameFlowController controller, ConnectFourWorldConfig config = null)
+        {
+            gameFlowController = controller;
+            if (config != null)
+            {
+                worldConfig = config;
+            }
+        }
+
         private void Awake()
         {
             if (boardRoot == null)
@@ -37,6 +46,11 @@ namespace FourWinsTikTok.World
 
         private void OnEnable()
         {
+            if (gameFlowController == null)
+            {
+                gameFlowController = FindFirstObjectByType<GameFlowController>();
+            }
+
             if (gameFlowController == null)
             {
                 Debug.LogError("ConnectFourWorldBoardView: Missing GameFlowController reference.");
