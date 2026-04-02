@@ -30,6 +30,35 @@ export class SessionStore {
     return this._sessions.get(key);
   }
 
+  resetSessionLifecycle(session) {
+    if (!session) {
+      return;
+    }
+
+    session.connector = null;
+    session.connected = false;
+    session.connecting = false;
+    session.registeredUsers = new Set();
+    session.lastChatSignature = "";
+    session.lastChatAt = 0;
+    session.lastPolledAt = Date.now();
+    session.lastConnectedAt = 0;
+    session.nextEventId = 0;
+    session.events = [];
+  }
+
+  deleteSession(hostIdOrSession) {
+    const key = typeof hostIdOrSession === "string"
+      ? normalizeHostId(hostIdOrSession)
+      : normalizeHostId(hostIdOrSession?.hostId);
+
+    if (!key) {
+      return false;
+    }
+
+    return this._sessions.delete(key);
+  }
+
   markPolled(session) {
     if (!session) {
       return;
@@ -54,6 +83,7 @@ export class SessionStore {
     const now = Date.now();
     let expired = 0;
 
+    const expiredSessions = [];
     for (const session of this._sessions.values()) {
       const referenceTime = Math.max(Number(session.lastPolledAt || 0), Number(session.lastConnectedAt || 0));
       if (referenceTime <= 0 || (now - referenceTime) < inactivityMs) {
@@ -64,6 +94,10 @@ export class SessionStore {
         continue;
       }
 
+      expiredSessions.push(session);
+    }
+
+    for (const session of expiredSessions) {
       expired += 1;
       if (typeof onExpire === "function") {
         onExpire(session);

@@ -77,6 +77,8 @@ function collectUserAliases(payload) {
 }
 
 export async function connectTikTokSession({ session, store, logger, registrationGiftName }) {
+  store.resetSessionLifecycle?.(session);
+
   const requestedGiftNormalized = normalizeGiftName(registrationGiftName || "Rose") || "rose";
   session.registrationGiftNameNormalized = requestedGiftNormalized;
 
@@ -228,5 +230,7 @@ export function disconnectTikTokSession({ session, store, logger }) {
 
   session.connected = false;
   session.connecting = false;
-  store.appendEvent(session, { type: "disconnected" });
+
+  const deleted = store.deleteSession?.(session) ?? false;
+  logger.info({ hostId: session.hostId, deleted }, "session lifecycle ended and cleaned");
 }

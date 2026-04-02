@@ -1,0 +1,16 @@
+services:
+  bridge:
+    container_name: 4wins-bridge-dev
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: 4wins-tiktok-bridge:dev
+    ports:
+      - "3010:3010"
+    environment:
+      - NODE_ENV=development
+      - PORT=3010
+      - BRIDGE_LOG_LEVEL=debug
+      - BRIDGE_EVENT_BUFFER_SIZE=1500
+      - BRIDGE_SESSION_INACTIVITY_TIMEOUT_SECONDS=20
+    restart: unless-stopped
