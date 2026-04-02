@@ -1,6 +1,8 @@
 <ui:UXML xmlns:ui="UnityEngine.UIElements" xmlns:uie="UnityEditor.UIElements">
     <ui:Style src="ConnectFourGame.uss" />
     <ui:VisualElement class="screen">
+        <ui:Button name="pause-button" class="pause-button" text="Pause" />
+
         <ui:VisualElement class="content-row">
             <ui:VisualElement class="hud-panel">
                 <ui:Label name="round-label" class="round-text" text="ROUND 1" />
@@ -41,6 +43,14 @@
             <ui:VisualElement class="popup-card">
                 <ui:Label name="popup-winner-label" class="popup-title" text="Community Wins" />
                 <ui:Button name="next-round-button" class="next-round-button" text="Next Round" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
+        <ui:VisualElement name="pause-popup" class="popup-overlay">
+            <ui:VisualElement class="popup-card">
+                <ui:Label class="popup-title" text="Pause" />
+                <ui:Button name="pause-resume-button" class="next-round-button" text="Resume" />
+                <ui:Button name="pause-exit-button" class="next-round-button pause-exit-button" text="Exit" />
             </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>

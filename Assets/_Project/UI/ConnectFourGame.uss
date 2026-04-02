@@ -18,6 +18,22 @@
     justify-content: center;
 }
 
+.pause-button {
+    position: absolute;
+    left: 10px;
+    top: 10px;
+    width: 120px;
+    height: 42px;
+    font-size: 19px;
+    -unity-font-style: bold;
+    color: rgba(34, 16, 8, 1);
+    background-color: rgba(255, 116, 36, 0.98);
+    border-top-color: rgba(255, 172, 86, 0.95);
+    border-right-color: rgba(255, 172, 86, 0.95);
+    border-bottom-color: rgba(130, 40, 14, 0.95);
+    border-left-color: rgba(255, 172, 86, 0.95);
+}
+
 .hud-panel {
     flex-grow: 1;
     max-width: 980px;
@@ -258,4 +274,8 @@
     border-right-color: rgba(255, 172, 86, 0.95);
     border-bottom-color: rgba(130, 40, 14, 0.95);
     border-left-color: rgba(255, 172, 86, 0.95);
+}
+
+.pause-exit-button {
+    margin-top: 10px;
 }

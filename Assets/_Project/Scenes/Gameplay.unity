@@ -3926,6 +3926,7 @@ MonoBehaviour:
   uiDocument: {fileID: 336915140}
   uiConfig: {fileID: 11400000, guid: 27d9543e7355b8eada90476049f1454f, type: 2}
   renderBoardInUi: 0
+  startSceneName: Bootstrap
   enableRuntimeLayoutDebug: 1
   autoApplyLayoutChanges: 1
   debugScaleMultiplier: 1
@@ -13318,10 +13319,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::FourWinsTikTok.Gameplay.GameFlowController
   gameConfig: {fileID: 11400000, guid: 441fcff97fe396193b85f0da89817434, type: 2}
   communityParticipantTurnSeconds: 60
+  streamerTurnSeconds: 60
   turnTimer: {fileID: 1191635325}
   chatAdapter: {fileID: 1191635324}
   useLocalStreamerInsteadOfBot: 1
   logVoteFlow: 1
+  ensureWorldBoardView: 1
 --- !u!114 &1191635324
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -13335,8 +13338,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FourWinsTikTok.TikTok.TikTokLiveChatAdapter
   connectionConfig: {fileID: 11400000, guid: d073c0650fe784452a734bdec93212fb, type: 2}
-  logChatMessages: 1
+  useBridgeInWebGL: 1
+  useBridgeInEditorForTesting: 0
+  bridgeBaseUrl: http://localhost:3010
+  bridgePollIntervalSeconds: 0.75
+  bridgeRequestTimeoutSeconds: 10
+  bridgeAutoReconnect: 1
+  bridgeReconnectDelaySeconds: 2
   logConnectionEvents: 1
+  logChatMessages: 1
+  logGiftMessages: 1
+  logBridgePollDetails: 0
 --- !u!114 &1191635325
 MonoBehaviour:
   m_ObjectHideFlags: 0

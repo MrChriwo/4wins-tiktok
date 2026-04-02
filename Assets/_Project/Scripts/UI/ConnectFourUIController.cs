@@ -9,6 +9,7 @@ using FourWinsTikTok.Voting;
 using TikTokLiveUnity;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.SceneManagement;
 using UnityEngine.UIElements;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -22,6 +23,7 @@ namespace FourWinsTikTok.UI
         [SerializeField] private UIDocument uiDocument;
         [SerializeField] private ConnectFourUIConfig uiConfig;
         [SerializeField] private bool renderBoardInUi;
+        [SerializeField] private string startSceneName = "Start";
 
         [Header("Runtime Layout Debug")]
         [SerializeField] private bool enableRuntimeLayoutDebug = true;
@@ -49,6 +51,10 @@ namespace FourWinsTikTok.UI
         private VisualElement _winnerPopup;
         private Label _popupWinnerLabel;
         private Button _nextRoundButton;
+        private Button _pauseButton;
+        private VisualElement _pausePopup;
+        private Button _pauseResumeButton;
+        private Button _pauseExitButton;
         private ParticipantRegistryService _participantRegistry;
         private readonly Dictionary<string, ParticipantInfo> _participantsByUserId = new Dictionary<string, ParticipantInfo>(System.StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, VisualElement> _participantRowsByUserId = new Dictionary<string, VisualElement>(System.StringComparer.OrdinalIgnoreCase);
@@ -128,6 +134,21 @@ namespace FourWinsTikTok.UI
                 _nextRoundButton.clicked += HandleNextRoundClicked;
             }
 
+            if (_pauseButton != null)
+            {
+                _pauseButton.clicked += HandlePauseClicked;
+            }
+
+            if (_pauseResumeButton != null)
+            {
+                _pauseResumeButton.clicked += HandlePauseResumeClicked;
+            }
+
+            if (_pauseExitButton != null)
+            {
+                _pauseExitButton.clicked += HandlePauseExitClicked;
+            }
+
             _participantRegistry = ParticipantRegistryService.EnsureInstance();
             _participantRegistry.OnParticipantRegistered += HandleParticipantRegistered;
             _participantRegistry.OnCleared += HandleParticipantsCleared;
@@ -138,6 +159,7 @@ namespace FourWinsTikTok.UI
 
             UpdateStreamerNameLabel();
             SetWinnerPopupVisible(false);
+            SetPausePopupVisible(false);
         }
 
         private void OnDisable()
@@ -147,6 +169,21 @@ namespace FourWinsTikTok.UI
             if (_nextRoundButton != null)
             {
                 _nextRoundButton.clicked -= HandleNextRoundClicked;
+            }
+
+            if (_pauseButton != null)
+            {
+                _pauseButton.clicked -= HandlePauseClicked;
+            }
+
+            if (_pauseResumeButton != null)
+            {
+                _pauseResumeButton.clicked -= HandlePauseResumeClicked;
+            }
+
+            if (_pauseExitButton != null)
+            {
+                _pauseExitButton.clicked -= HandlePauseExitClicked;
             }
 
             if (_participantRegistry != null)
@@ -251,6 +288,10 @@ namespace FourWinsTikTok.UI
             _winnerPopup = root.Q<VisualElement>("winner-popup");
             _popupWinnerLabel = root.Q<Label>("popup-winner-label");
             _nextRoundButton = root.Q<Button>("next-round-button");
+            _pauseButton = root.Q<Button>("pause-button");
+            _pausePopup = root.Q<VisualElement>("pause-popup");
+            _pauseResumeButton = root.Q<Button>("pause-resume-button");
+            _pauseExitButton = root.Q<Button>("pause-exit-button");
             VisualElement boardFrame = root.Q<VisualElement>("board-frame");
             VisualElement boardGrid = root.Q<VisualElement>("board-grid");
 
@@ -519,6 +560,56 @@ namespace FourWinsTikTok.UI
             SetWinnerPopupVisible(false);
         }
 
+        private void HandlePauseClicked()
+        {
+            if (gameFlowController == null || gameFlowController.CurrentState == GameFlowState.GameOver)
+            {
+                return;
+            }
+
+            gameFlowController.PauseGameplay();
+            SetPausePopupVisible(true);
+        }
+
+        private void HandlePauseResumeClicked()
+        {
+            if (gameFlowController != null)
+            {
+                gameFlowController.ResumeGameplay();
+            }
+
+            SetPausePopupVisible(false);
+        }
+
+        private void HandlePauseExitClicked()
+        {
+            if (gameFlowController != null)
+            {
+                gameFlowController.ResumeGameplay();
+            }
+
+            TikTokLiveChatAdapter adapter = TikTokLiveChatAdapter.Instance;
+            if (adapter == null)
+            {
+                adapter = FindFirstObjectByType<TikTokLiveChatAdapter>();
+            }
+
+            if (adapter != null)
+            {
+                adapter.Disconnect();
+            }
+
+            ParticipantRegistryService registry = ParticipantRegistryService.Instance;
+            if (registry != null)
+            {
+                registry.ResetParticipants();
+            }
+
+            ParticipantSnapshotStore.Clear();
+            SetPausePopupVisible(false);
+            SceneManager.LoadScene(startSceneName, LoadSceneMode.Single);
+        }
+
         private void RebuildParticipantList()
         {
             if (_participantsScroll == null)
@@ -680,6 +771,14 @@ namespace FourWinsTikTok.UI
             if (_winnerPopup != null)
             {
                 _winnerPopup.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
+            }
+        }
+
+        private void SetPausePopupVisible(bool visible)
+        {
+            if (_pausePopup != null)
+            {
+                _pausePopup.style.display = visible ? DisplayStyle.Flex : DisplayStyle.None;
             }
         }
 
