@@ -17760,13 +17760,17 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::FourWinsTikTok.TikTok.TikTokLiveChatAdapter
   connectionConfig: {fileID: 0}
-  logChatMessages: 0
-  logConnectionEvents: 1
   useBridgeInWebGL: 1
   useBridgeInEditorForTesting: 1
-  bridgeBaseUrl: http://localhost:3010
+  bridgeBaseUrl: https://apitt4wins.arrayhive.dev
   bridgePollIntervalSeconds: 0.75
   bridgeRequestTimeoutSeconds: 10
+  bridgeAutoReconnect: 1
+  bridgeReconnectDelaySeconds: 2
+  logConnectionEvents: 1
+  logChatMessages: 0
+  logGiftMessages: 1
+  logBridgePollDetails: 0
 --- !u!4 &1761297213
 Transform:
   m_ObjectHideFlags: 0

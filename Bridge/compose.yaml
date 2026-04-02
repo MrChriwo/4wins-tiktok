@@ -5,11 +5,24 @@ services:
       context: .
       dockerfile: Dockerfile
     image: 4wins-tiktok-bridge:latest
-    ports:
-      - "3010:3010"
+    expose:
+      - "3010"
     environment:
       - NODE_ENV=production
       - PORT=3010
       - BRIDGE_LOG_LEVEL=info
       - BRIDGE_EVENT_BUFFER_SIZE=1500
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.routers.4wins-bridge.rule=Host(`apitt4wins.arrayhive.dev`)
+      - traefik.http.routers.4wins-bridge.entrypoints=websecure
+      - traefik.http.routers.4wins-bridge.tls=true
+      - traefik.http.services.4wins-bridge.loadbalancer.server.port=3010
+    networks:
+      - web
     restart: unless-stopped
+
+networks:
+  web:
+    external: true

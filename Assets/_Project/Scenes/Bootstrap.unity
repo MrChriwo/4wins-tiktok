@@ -13794,9 +13794,11 @@ MonoBehaviour:
   connectionConfig: {fileID: 0}
   useBridgeInWebGL: 1
   useBridgeInEditorForTesting: 1
-  bridgeBaseUrl: http://localhost:3010
+  bridgeBaseUrl: https://apitt4wins.arrayhive.dev
   bridgePollIntervalSeconds: 0.75
   bridgeRequestTimeoutSeconds: 10
+  bridgeAutoReconnect: 1
+  bridgeReconnectDelaySeconds: 2
   logConnectionEvents: 1
   logChatMessages: 0
   logGiftMessages: 1
