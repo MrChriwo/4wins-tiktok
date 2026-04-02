@@ -21,6 +21,7 @@ namespace FourWinsTikTok.Gameplay
         [Header("Config")]
         [SerializeField] private ConnectFourGameConfig gameConfig;
         [SerializeField, Min(5f)] private float communityParticipantTurnSeconds = 60f;
+        [SerializeField, Min(5f)] private float streamerTurnSeconds = 60f;
 
         [Header("References")]
         [SerializeField] private TurnTimer turnTimer;
@@ -64,6 +65,7 @@ namespace FourWinsTikTok.Gameplay
         private float _participantTurnSecondsRuntime = 60f;
         private float _nextRuntimeReconcileAt;
         private float _communityTurnDeadlineRealtime;
+        private float _streamerTurnDeadlineRealtime;
         private float _lastHandledCommunityTimeoutRealtime = -10f;
 
         public BoardState CurrentBoard { get; private set; }
@@ -79,14 +81,18 @@ namespace FourWinsTikTok.Gameplay
         {
             get
             {
-                if (CurrentState != GameFlowState.WaitingForCommunityVote)
+                if (CurrentState != GameFlowState.WaitingForCommunityVote && CurrentState != GameFlowState.WaitingForStreamerMove)
                 {
                     return 0f;
                 }
 
-                if (_communityTurnDeadlineRealtime > 0f)
+                float deadline = CurrentState == GameFlowState.WaitingForCommunityVote
+                    ? _communityTurnDeadlineRealtime
+                    : _streamerTurnDeadlineRealtime;
+
+                if (deadline > 0f)
                 {
-                    return Mathf.Max(0f, _communityTurnDeadlineRealtime - Time.realtimeSinceStartup);
+                    return Mathf.Max(0f, deadline - Time.realtimeSinceStartup);
                 }
 
                 return EnsureTurnTimer() != null ? turnTimer.RemainingTime : 0f;
@@ -240,6 +246,29 @@ namespace FourWinsTikTok.Gameplay
 
             if (CurrentState != GameFlowState.WaitingForCommunityVote)
             {
+                if (CurrentState == GameFlowState.WaitingForStreamerMove)
+                {
+                    TurnTimer streamerTimer = EnsureTurnTimer();
+                    if (streamerTimer == null)
+                    {
+                        return;
+                    }
+
+                    float streamerRemaining = CommunityTurnRemainingSeconds;
+                    if (streamerRemaining <= 0.01f)
+                    {
+                        HandleStreamerTimerCompleted();
+                        return;
+                    }
+
+                    if (!streamerTimer.IsRunning)
+                    {
+                        streamerTimer.StartCountdown(streamerRemaining);
+                        OnTimerChanged?.Invoke(streamerRemaining);
+                        Debug.LogWarning("GameFlowController: Recovered stopped timer for streamer turn.");
+                    }
+                }
+
                 return;
             }
 
@@ -283,22 +312,36 @@ namespace FourWinsTikTok.Gameplay
 
         private void TickCommunityTurnDeadline()
         {
-            if (CurrentState != GameFlowState.WaitingForCommunityVote || string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId))
+            if (CurrentState == GameFlowState.WaitingForCommunityVote)
             {
+                if (string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId) || _communityTurnDeadlineRealtime <= 0f)
+                {
+                    return;
+                }
+
+                if (Time.realtimeSinceStartup < _communityTurnDeadlineRealtime)
+                {
+                    return;
+                }
+
+                HandleCommunityTimerCompleted();
                 return;
             }
 
-            if (_communityTurnDeadlineRealtime <= 0f)
+            if (CurrentState == GameFlowState.WaitingForStreamerMove)
             {
-                return;
-            }
+                if (_streamerTurnDeadlineRealtime <= 0f)
+                {
+                    return;
+                }
 
-            if (Time.realtimeSinceStartup < _communityTurnDeadlineRealtime)
-            {
-                return;
-            }
+                if (Time.realtimeSinceStartup < _streamerTurnDeadlineRealtime)
+                {
+                    return;
+                }
 
-            HandleCommunityTimerCompleted();
+                HandleStreamerTimerCompleted();
+            }
         }
 
         public void StartNewGame()
@@ -340,6 +383,7 @@ namespace FourWinsTikTok.Gameplay
             _activeCommunityParticipantIndex = -1;
             _activeCommunityParticipantUserId = string.Empty;
             _communityTurnDeadlineRealtime = 0f;
+            _streamerTurnDeadlineRealtime = 0f;
             StopAwaitParticipantsRoutine();
 
             SetState(GameFlowState.Idle);
@@ -373,6 +417,7 @@ namespace FourWinsTikTok.Gameplay
             EnsureTurnTimer()?.CancelCountdown();
             _currentRound++;
             _communityTurnDeadlineRealtime = 0f;
+            _streamerTurnDeadlineRealtime = 0f;
 
             SetState(GameFlowState.Idle);
             ActivePlayer = PlayerSide.None;
@@ -458,7 +503,7 @@ namespace FourWinsTikTok.Gameplay
                 if (turnTimer != null)
                 {
                     turnTimer.OnTick += HandleTimerTick;
-                    turnTimer.OnCompleted += HandleCommunityTimerCompleted;
+                    turnTimer.OnCompleted += HandleTurnTimerCompleted;
                     _subscribedTurnTimer = turnTimer;
                 }
             }
@@ -529,7 +574,7 @@ namespace FourWinsTikTok.Gameplay
             }
 
             _subscribedTurnTimer.OnTick -= HandleTimerTick;
-            _subscribedTurnTimer.OnCompleted -= HandleCommunityTimerCompleted;
+            _subscribedTurnTimer.OnCompleted -= HandleTurnTimerCompleted;
             _subscribedTurnTimer = null;
         }
 
@@ -597,6 +642,7 @@ namespace FourWinsTikTok.Gameplay
                 ActivePlayer = PlayerSide.Community;
                 _activeCommunityParticipantUserId = string.Empty;
                 _communityTurnDeadlineRealtime = 0f;
+                _streamerTurnDeadlineRealtime = 0f;
                 OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
                 OnTimerChanged?.Invoke(0f);
                 OnStatusMessage?.Invoke("No participants registered yet. Waiting for participants...");
@@ -607,6 +653,7 @@ namespace FourWinsTikTok.Gameplay
 
             StopAwaitParticipantsRoutine();
             ActivePlayer = PlayerSide.Community;
+            _streamerTurnDeadlineRealtime = 0f;
             OnVoteUpdated?.Invoke(Array.Empty<Voting.VoteTally>());
 
             SetState(GameFlowState.WaitingForCommunityVote);
@@ -662,6 +709,7 @@ namespace FourWinsTikTok.Gameplay
             _activeCommunityParticipantIndex = -1;
             _activeCommunityParticipantUserId = string.Empty;
             _communityTurnDeadlineRealtime = 0f;
+            _streamerTurnDeadlineRealtime = 0f;
             OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
             OnTimerChanged?.Invoke(0f);
             StartAwaitParticipantsRoutine();
@@ -711,9 +759,23 @@ namespace FourWinsTikTok.Gameplay
 
         private void HandleTimerTick(float remainingSeconds)
         {
-            if (CurrentState == GameFlowState.WaitingForCommunityVote)
+            if (CurrentState == GameFlowState.WaitingForCommunityVote || CurrentState == GameFlowState.WaitingForStreamerMove)
             {
                 OnTimerChanged?.Invoke(remainingSeconds);
+            }
+        }
+
+        private void HandleTurnTimerCompleted()
+        {
+            if (CurrentState == GameFlowState.WaitingForCommunityVote)
+            {
+                HandleCommunityTimerCompleted();
+                return;
+            }
+
+            if (CurrentState == GameFlowState.WaitingForStreamerMove)
+            {
+                HandleStreamerTimerCompleted();
             }
         }
 
@@ -1049,6 +1111,10 @@ namespace FourWinsTikTok.Gameplay
                 return false;
             }
 
+            _streamerTurnDeadlineRealtime = 0f;
+            EnsureTurnTimer()?.CancelCountdown();
+            OnTimerChanged?.Invoke(0f);
+
             if (CurrentState != GameFlowState.GameOver)
             {
                 BeginCommunityTurn();
@@ -1122,6 +1188,7 @@ namespace FourWinsTikTok.Gameplay
         private void StartCommunityParticipantCountdown(float durationSeconds)
         {
             float clampedDuration = Mathf.Max(0f, durationSeconds);
+            _streamerTurnDeadlineRealtime = 0f;
             _communityTurnDeadlineRealtime = clampedDuration > 0f
                 ? Time.realtimeSinceStartup + clampedDuration
                 : 0f;
@@ -1279,9 +1346,39 @@ namespace FourWinsTikTok.Gameplay
             ActivePlayer = PlayerSide.Streamer;
             _activeCommunityParticipantUserId = string.Empty;
             _communityTurnDeadlineRealtime = 0f;
+            float streamerDuration = Mathf.Max(0f, streamerTurnSeconds);
+            _streamerTurnDeadlineRealtime = streamerDuration > 0f
+                ? Time.realtimeSinceStartup + streamerDuration
+                : 0f;
             OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
-            OnStatusMessage?.Invoke("Streamer turn: click a column or press 1-7.");
-            OnTimerChanged?.Invoke(0f);
+            OnStatusMessage?.Invoke($"Streamer turn: click a column or press 1-7 in {Mathf.RoundToInt(streamerDuration)}s.");
+            EnsureTurnTimer()?.StartCountdown(streamerDuration);
+            OnTimerChanged?.Invoke(streamerDuration);
+        }
+
+        private void HandleStreamerTimerCompleted()
+        {
+            if (CurrentState != GameFlowState.WaitingForStreamerMove || CurrentBoard == null)
+            {
+                return;
+            }
+
+            if (_streamerTurnDeadlineRealtime > 0f && Time.realtimeSinceStartup < _streamerTurnDeadlineRealtime)
+            {
+                return;
+            }
+
+            _streamerTurnDeadlineRealtime = 0f;
+            List<int> validColumns = CurrentBoard.GetValidColumns();
+            if (validColumns.Count == 0)
+            {
+                EndAsDraw();
+                return;
+            }
+
+            int timeoutColumn = validColumns[_random.Next(validColumns.Count)];
+            OnStatusMessage?.Invoke($"Streamer timeout. Auto move in column {timeoutColumn + 1}.");
+            TrySubmitStreamerMoveFromColumnIndex(timeoutColumn);
         }
 
         private bool TryExecuteMove(int column, PlayerSide side)

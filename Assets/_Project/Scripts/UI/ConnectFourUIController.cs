@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using System.Text;
 using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
 using FourWinsTikTok.Core;
@@ -42,19 +41,19 @@ namespace FourWinsTikTok.UI
         private Label _chatScoreLabel;
         private Label _streamerScoreLabel;
         private Label _timerLabel;
-        private Label _votingLabel;
+        private Label _activePlayerNameLabel;
         private Label _statusLabel;
         private Label _winnerLabel;
         private ScrollView _participantsScroll;
+        private VisualElement _activePlayerAvatar;
         private VisualElement _winnerPopup;
         private Label _popupWinnerLabel;
         private Button _nextRoundButton;
         private ParticipantRegistryService _participantRegistry;
+        private readonly Dictionary<string, ParticipantInfo> _participantsByUserId = new Dictionary<string, ParticipantInfo>(System.StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, VisualElement> _participantRowsByUserId = new Dictionary<string, VisualElement>(System.StringComparer.OrdinalIgnoreCase);
         private string _activeParticipantUserId = string.Empty;
-        private IVisualElementScheduledItem _activePulseItem;
         private VisualElement _activePulseRow;
-        private bool _activePulseState;
         private IVisualElementScheduledItem _gameplayUiSyncItem;
         private GameFlowController _subscribedGameFlowController;
         private bool _hasUiTimerCountdown;
@@ -93,7 +92,8 @@ namespace FourWinsTikTok.UI
                 return;
             }
 
-            if (gameFlowController.CurrentState != GameFlowState.WaitingForCommunityVote)
+            if (gameFlowController.CurrentState != GameFlowState.WaitingForCommunityVote
+                && gameFlowController.CurrentState != GameFlowState.WaitingForStreamerMove)
             {
                 return;
             }
@@ -172,15 +172,23 @@ namespace FourWinsTikTok.UI
                 return;
             }
 
-            if (gameFlowController.CurrentState == GameFlowState.WaitingForCommunityVote)
+            if (gameFlowController.CurrentState == GameFlowState.WaitingForCommunityVote || gameFlowController.CurrentState == GameFlowState.WaitingForStreamerMove)
             {
                 float controllerRemaining = gameFlowController.CommunityTurnRemainingSeconds;
                 SetTimerLabel(controllerRemaining);
+
+                if (gameFlowController.CurrentState == GameFlowState.WaitingForStreamerMove)
+                {
+                    StopActiveParticipantPulse();
+                    SetActivePlayerDisplay(GetStreamerDisplayName(), null);
+                    return;
+                }
 
                 string activeUserId = gameFlowController.ActiveCommunityParticipantUserId;
                 if (string.IsNullOrWhiteSpace(activeUserId))
                 {
                     StopActiveParticipantPulse();
+                    SetActivePlayerDisplay(string.Empty, null);
                     return;
                 }
 
@@ -188,6 +196,15 @@ namespace FourWinsTikTok.UI
                 if (_participantRowsByUserId.TryGetValue(activeUserId, out VisualElement row))
                 {
                     SetActiveParticipantRow(row);
+                }
+
+                if (_participantsByUserId.TryGetValue(activeUserId, out ParticipantInfo participant))
+                {
+                    SetActivePlayerDisplay(participant);
+                }
+                else
+                {
+                    SetActivePlayerDisplay(activeUserId, null);
                 }
 
                 return;
@@ -201,6 +218,7 @@ namespace FourWinsTikTok.UI
             _hasUiTimerCountdown = false;
 
             StopActiveParticipantPulse();
+            SetActivePlayerDisplay(string.Empty, null);
         }
 
         private bool TryBindUi()
@@ -225,10 +243,11 @@ namespace FourWinsTikTok.UI
             _chatScoreLabel = root.Q<Label>("chat-score-label");
             _streamerScoreLabel = root.Q<Label>("streamer-score-label");
             _timerLabel = root.Q<Label>("timer-label");
-            _votingLabel = root.Q<Label>("voting-label");
+            _activePlayerNameLabel = root.Q<Label>("active-player-name");
             _statusLabel = root.Q<Label>("status-label");
             _winnerLabel = root.Q<Label>("winner-label");
             _participantsScroll = root.Q<ScrollView>("participants-scroll");
+            _activePlayerAvatar = root.Q<VisualElement>("active-player-avatar");
             _winnerPopup = root.Q<VisualElement>("winner-popup");
             _popupWinnerLabel = root.Q<Label>("popup-winner-label");
             _nextRoundButton = root.Q<Button>("next-round-button");
@@ -301,7 +320,8 @@ namespace FourWinsTikTok.UI
                 return;
             }
 
-            if (gameFlowController.CurrentState != GameFlowState.WaitingForCommunityVote)
+            if (gameFlowController.CurrentState != GameFlowState.WaitingForCommunityVote
+                && gameFlowController.CurrentState != GameFlowState.WaitingForStreamerMove)
             {
                 return;
             }
@@ -380,33 +400,7 @@ namespace FourWinsTikTok.UI
 
         private void HandleVoteUpdated(IReadOnlyList<VoteTally> ranking)
         {
-            if (_votingLabel == null)
-            {
-                return;
-            }
-
-            if (ranking == null || ranking.Count == 0)
-            {
-                _votingLabel.text = "Turn mode: participants";
-                return;
-            }
-
-            StringBuilder builder = new StringBuilder("Votes: ");
-            for (int index = 0; index < ranking.Count; index++)
-            {
-                VoteTally tally = ranking[index];
-                builder.Append(tally.DisplayColumn);
-                builder.Append('(');
-                builder.Append(tally.VoteCount);
-                builder.Append(')');
-
-                if (index < ranking.Count - 1)
-                {
-                    builder.Append(" | ");
-                }
-            }
-
-            _votingLabel.text = builder.ToString();
+            // Voting text removed from HUD by design.
         }
 
         private void HandleStatusMessage(string message)
@@ -533,6 +527,7 @@ namespace FourWinsTikTok.UI
             }
 
             _participantsScroll.contentContainer.Clear();
+            _participantsByUserId.Clear();
             _participantRowsByUserId.Clear();
             if (_participantRegistry == null)
             {
@@ -553,9 +548,11 @@ namespace FourWinsTikTok.UI
             }
 
             _participantsScroll.contentContainer.Clear();
+            _participantsByUserId.Clear();
             _participantRowsByUserId.Clear();
             _activeParticipantUserId = string.Empty;
             StopActiveParticipantPulse();
+            SetActivePlayerDisplay(string.Empty, null);
         }
 
         private void HandleParticipantRegistered(ParticipantInfo participant)
@@ -582,10 +579,12 @@ namespace FourWinsTikTok.UI
             row.Add(nameLabel);
 
             _participantsScroll.Add(row);
+            _participantsByUserId[participant.UserId] = participant;
             _participantRowsByUserId[participant.UserId] = row;
             if (string.Equals(_activeParticipantUserId, participant.UserId, System.StringComparison.OrdinalIgnoreCase))
             {
                 SetActiveParticipantRow(row);
+                SetActivePlayerDisplay(participant.DisplayName, participant.AvatarUrl);
             }
 
             if (participant.AvatarPicture != null && TikTokLiveManager.Instance != null)
@@ -691,12 +690,29 @@ namespace FourWinsTikTok.UI
             if (string.IsNullOrWhiteSpace(userId))
             {
                 StopActiveParticipantPulse();
+                if (gameFlowController != null && gameFlowController.CurrentState == GameFlowState.WaitingForStreamerMove)
+                {
+                    SetActivePlayerDisplay(GetStreamerDisplayName(), null);
+                }
+                else
+                {
+                    SetActivePlayerDisplay(string.Empty, null);
+                }
                 return;
             }
 
             if (_participantRowsByUserId.TryGetValue(userId, out VisualElement row))
             {
                 SetActiveParticipantRow(row);
+            }
+
+            if (_participantsByUserId.TryGetValue(userId, out ParticipantInfo participant))
+            {
+                SetActivePlayerDisplay(participant);
+            }
+            else
+            {
+                SetActivePlayerDisplay(userId, null);
             }
         }
 
@@ -710,43 +726,68 @@ namespace FourWinsTikTok.UI
             StopActiveParticipantPulse();
             _activePulseRow = row;
             _activePulseRow.AddToClassList("active-turn");
-            _activePulseState = false;
-
-            _activePulseItem = _activePulseRow.schedule.Execute(() =>
-            {
-                if (_activePulseRow == null)
-                {
-                    return;
-                }
-
-                _activePulseState = !_activePulseState;
-                if (_activePulseState)
-                {
-                    _activePulseRow.AddToClassList("active-turn-pulse");
-                }
-                else
-                {
-                    _activePulseRow.RemoveFromClassList("active-turn-pulse");
-                }
-            }).Every(420);
         }
 
         private void StopActiveParticipantPulse()
         {
-            if (_activePulseItem != null)
-            {
-                _activePulseItem.Pause();
-                _activePulseItem = null;
-            }
-
             if (_activePulseRow != null)
             {
                 _activePulseRow.RemoveFromClassList("active-turn");
-                _activePulseRow.RemoveFromClassList("active-turn-pulse");
                 _activePulseRow = null;
             }
+        }
 
-            _activePulseState = false;
+        private void SetActivePlayerDisplay(string displayName, string avatarUrl)
+        {
+            if (_activePlayerNameLabel != null)
+            {
+                _activePlayerNameLabel.text = string.IsNullOrWhiteSpace(displayName) ? string.Empty : displayName;
+            }
+
+            if (_activePlayerAvatar == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(avatarUrl))
+            {
+                _activePlayerAvatar.style.backgroundImage = StyleKeyword.Null;
+                return;
+            }
+
+            StartCoroutine(LoadAvatarFromUrlRoutine(_activePlayerAvatar, avatarUrl));
+        }
+
+        private void SetActivePlayerDisplay(ParticipantInfo participant)
+        {
+            if (participant == null)
+            {
+                SetActivePlayerDisplay(string.Empty, null);
+                return;
+            }
+
+            string displayName = string.IsNullOrWhiteSpace(participant.DisplayName)
+                ? participant.UserId
+                : participant.DisplayName;
+
+            if (participant.AvatarPicture != null && TikTokLiveManager.Instance != null && _activePlayerAvatar != null)
+            {
+                if (_activePlayerNameLabel != null)
+                {
+                    _activePlayerNameLabel.text = displayName;
+                }
+
+                TikTokLiveManager.Instance.RequestSprite(participant.AvatarPicture, sprite =>
+                {
+                    if (sprite != null && _activePlayerAvatar != null)
+                    {
+                        _activePlayerAvatar.style.backgroundImage = new StyleBackground(sprite);
+                    }
+                });
+                return;
+            }
+
+            SetActivePlayerDisplay(displayName, participant.AvatarUrl);
         }
 
         private void UpdateStreamerNameLabel()

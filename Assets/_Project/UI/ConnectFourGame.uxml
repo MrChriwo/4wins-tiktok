@@ -4,6 +4,10 @@
         <ui:VisualElement class="content-row">
             <ui:VisualElement class="hud-panel">
                 <ui:Label name="round-label" class="round-text" text="ROUND 1" />
+                <ui:VisualElement class="active-player-display">
+                    <ui:VisualElement name="active-player-avatar" class="active-player-avatar" />
+                    <ui:Label name="active-player-name" class="active-player-name" text="" />
+                </ui:VisualElement>
 
                 <ui:VisualElement class="score-columns">
                     <ui:VisualElement class="score-column left">
@@ -22,7 +26,6 @@
                 </ui:VisualElement>
 
                 <ui:VisualElement class="info-row">
-                    <ui:Label name="voting-label" class="info-text" text="Votes: -" />
                     <ui:Label name="status-label" class="info-text" text="Status" />
                     <ui:Label name="winner-label" class="info-text winner-text" text="" />
                 </ui:VisualElement>

@@ -41,6 +41,33 @@
     -unity-text-outline-width: 2px;
 }
 
+.active-player-display {
+    margin-top: 6px;
+    align-items: center;
+    justify-content: center;
+    min-height: 98px;
+}
+
+.active-player-avatar {
+    width: 56px;
+    height: 56px;
+    border-top-left-radius: 28px;
+    border-top-right-radius: 28px;
+    border-bottom-left-radius: 28px;
+    border-bottom-right-radius: 28px;
+    background-color: rgba(120, 90, 60, 0.8);
+    background-size: cover;
+    background-position: center;
+}
+
+.active-player-name {
+    margin-top: 6px;
+    font-size: 20px;
+    -unity-font-style: bold;
+    color: rgb(255, 214, 160);
+    -unity-text-align: middle-center;
+}
+
 .score-columns {
     margin-top: 4px;
     width: 100%;
@@ -165,10 +192,6 @@
 
 .participant-row.active-turn {
     background-color: rgba(255, 158, 72, 0.42);
-}
-
-.participant-row.active-turn-pulse {
-    background-color: rgba(255, 196, 120, 0.62);
 }
 
 .participant-avatar {
