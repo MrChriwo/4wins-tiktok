@@ -10299,6 +10299,10 @@ MonoBehaviour:
   uiDocument: {fileID: 995553520}
   tikTokAdapter: {fileID: 0}
   gameplaySceneName: Gameplay
+  challengeUiTopPx: 478.7
+  challengeUiHeightPx: 260
+  challengeCircleSizePx: 190
+  challengeCounterSpacingPx: 18
 --- !u!4 &1039938406
 Transform:
   m_ObjectHideFlags: 0
@@ -17763,6 +17767,7 @@ MonoBehaviour:
   useBridgeInWebGL: 1
   useBridgeInEditorForTesting: 1
   bridgeBaseUrl: https://apitt4wins.arrayhive.dev
+  editorBridgeBaseUrlOverride: http://localhost:3010
   bridgePollIntervalSeconds: 0.75
   bridgeRequestTimeoutSeconds: 10
   bridgeAutoReconnect: 1
