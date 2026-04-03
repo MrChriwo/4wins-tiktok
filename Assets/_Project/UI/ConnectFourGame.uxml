@@ -39,6 +39,13 @@
             <ui:ScrollView name="participants-scroll" class="participants-scroll" />
         </ui:VisualElement>
 
+        <ui:VisualElement name="sabotage-overlay" class="sabotage-overlay">
+            <ui:VisualElement class="sabotage-card">
+                <ui:VisualElement name="sabotage-avatar" class="sabotage-avatar" />
+                <ui:Label name="sabotage-text" class="sabotage-text" text="Cheeky Bird hijacked the turn!" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
         <ui:VisualElement name="winner-popup" class="popup-overlay">
             <ui:VisualElement class="popup-card">
                 <ui:Label name="popup-winner-label" class="popup-title" text="Community Wins" />

@@ -57,6 +57,10 @@ namespace FourWinsTikTok.UI
         private VisualElement _pausePopup;
         private Button _pauseResumeButton;
         private Button _pauseExitButton;
+        private VisualElement _sabotageOverlay;
+        private VisualElement _sabotageAvatar;
+        private Label _sabotageText;
+        private Coroutine _sabotageOverlayRoutine;
         private ParticipantRegistryService _participantRegistry;
         private readonly Dictionary<string, ParticipantInfo> _participantsByUserId = new Dictionary<string, ParticipantInfo>(System.StringComparer.OrdinalIgnoreCase);
         private readonly Dictionary<string, VisualElement> _participantRowsByUserId = new Dictionary<string, VisualElement>(System.StringComparer.OrdinalIgnoreCase);
@@ -162,6 +166,10 @@ namespace FourWinsTikTok.UI
             SyncGameplayIndicators();
 
             UpdateStreamerNameLabel();
+            if (_sabotageOverlay != null)
+            {
+                _sabotageOverlay.style.display = DisplayStyle.None;
+            }
             SetWinnerPopupVisible(false);
             SetPausePopupVisible(false);
         }
@@ -203,6 +211,17 @@ namespace FourWinsTikTok.UI
                 _gameplayUiSyncItem = null;
             }
 
+            if (_sabotageOverlayRoutine != null)
+            {
+                StopCoroutine(_sabotageOverlayRoutine);
+                _sabotageOverlayRoutine = null;
+            }
+
+            if (_sabotageOverlay != null)
+            {
+                _sabotageOverlay.style.display = DisplayStyle.None;
+            }
+
             StopActiveParticipantPulse();
         }
 
@@ -222,6 +241,25 @@ namespace FourWinsTikTok.UI
                 if (gameFlowController.CurrentState == GameFlowState.WaitingForStreamerMove)
                 {
                     StopActiveParticipantPulse();
+
+                    if (gameFlowController.IsSabotageTurnActive)
+                    {
+                        string hijackerUserId = gameFlowController.ActiveCommunityParticipantUserId;
+                        if (!string.IsNullOrWhiteSpace(hijackerUserId))
+                        {
+                            if (_participantsByUserId.TryGetValue(hijackerUserId, out ParticipantInfo hijackerParticipant))
+                            {
+                                SetActivePlayerDisplay(hijackerParticipant);
+                            }
+                            else
+                            {
+                                SetActivePlayerDisplay(hijackerUserId, null);
+                            }
+
+                            return;
+                        }
+                    }
+
                     SetActivePlayerDisplay(GetStreamerDisplayName(), null);
                     return;
                 }
@@ -297,6 +335,9 @@ namespace FourWinsTikTok.UI
             _pausePopup = root.Q<VisualElement>("pause-popup");
             _pauseResumeButton = root.Q<Button>("pause-resume-button");
             _pauseExitButton = root.Q<Button>("pause-exit-button");
+            _sabotageOverlay = root.Q<VisualElement>("sabotage-overlay");
+            _sabotageAvatar = root.Q<VisualElement>("sabotage-avatar");
+            _sabotageText = root.Q<Label>("sabotage-text");
             VisualElement boardFrame = root.Q<VisualElement>("board-frame");
             VisualElement boardGrid = root.Q<VisualElement>("board-grid");
 
@@ -421,6 +462,7 @@ namespace FourWinsTikTok.UI
             gameFlowController.OnRoundScoreChanged += HandleRoundScoreChanged;
             gameFlowController.OnRoundCompleted += HandleRoundCompleted;
             gameFlowController.OnCommunityParticipantTurnChanged += HandleCommunityParticipantTurnChanged;
+            gameFlowController.OnSabotageTriggered += HandleSabotageTriggered;
             _subscribedGameFlowController = gameFlowController;
         }
 
@@ -441,7 +483,60 @@ namespace FourWinsTikTok.UI
             _subscribedGameFlowController.OnRoundScoreChanged -= HandleRoundScoreChanged;
             _subscribedGameFlowController.OnRoundCompleted -= HandleRoundCompleted;
             _subscribedGameFlowController.OnCommunityParticipantTurnChanged -= HandleCommunityParticipantTurnChanged;
+            _subscribedGameFlowController.OnSabotageTriggered -= HandleSabotageTriggered;
             _subscribedGameFlowController = null;
+        }
+
+        private void HandleSabotageTriggered(GiftMessage giftMessage)
+        {
+            if (_sabotageOverlay == null)
+            {
+                return;
+            }
+
+            string displayName = string.IsNullOrWhiteSpace(giftMessage.DisplayName)
+                ? giftMessage.UserId
+                : giftMessage.DisplayName;
+
+            if (_sabotageText != null)
+            {
+                _sabotageText.text = $"{displayName} hijacked the turn!";
+            }
+
+            if (_sabotageAvatar != null)
+            {
+                _sabotageAvatar.style.backgroundImage = StyleKeyword.Null;
+
+                if (giftMessage.AvatarPicture != null && TikTokLiveManager.Instance != null)
+                {
+                    TikTokLiveManager.Instance.RequestSprite(giftMessage.AvatarPicture, sprite =>
+                    {
+                        if (sprite != null && _sabotageAvatar != null)
+                        {
+                            _sabotageAvatar.style.backgroundImage = new StyleBackground(sprite);
+                        }
+                    });
+                }
+                else if (!string.IsNullOrWhiteSpace(giftMessage.AvatarUrl))
+                {
+                    StartCoroutine(LoadAvatarFromUrlRoutine(_sabotageAvatar, giftMessage.AvatarUrl));
+                }
+            }
+
+            if (_sabotageOverlayRoutine != null)
+            {
+                StopCoroutine(_sabotageOverlayRoutine);
+            }
+
+            _sabotageOverlayRoutine = StartCoroutine(ShowSabotageOverlayRoutine());
+        }
+
+        private IEnumerator ShowSabotageOverlayRoutine()
+        {
+            _sabotageOverlay.style.display = DisplayStyle.Flex;
+            yield return new WaitForSeconds(2f);
+            _sabotageOverlay.style.display = DisplayStyle.None;
+            _sabotageOverlayRoutine = null;
         }
 
         private void HandleVoteUpdated(IReadOnlyList<VoteTally> ranking)

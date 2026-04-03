@@ -9,6 +9,7 @@ namespace FourWinsTikTok.Bootstrap
         public const string BeginnerChallengeGiftNamePlayerPrefsKey = "4wins.challenge.gift_name";
         public const string BeginnerChallengeCoinTargetPlayerPrefsKey = "4wins.challenge.coin_target";
         public const string BeginnerChallengeDurationSecondsPlayerPrefsKey = "4wins.challenge.duration_seconds";
+        public const string SabotageGiftNamePlayerPrefsKey = "4wins.gameplay.sabotage_gift_name";
         public const string MatchStartingSidePlayerPrefsKey = "4wins.match.starting_side";
         public const string MatchResumePendingPlayerPrefsKey = "4wins.match.resume.pending";
         public const string MatchResumeRoundPlayerPrefsKey = "4wins.match.resume.round";

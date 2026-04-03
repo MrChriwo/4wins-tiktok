@@ -30,6 +30,7 @@
                 <ui:IntegerField name="settings-challenge-coin-target-field" label="Beginner Challenge Coin Target" value="500" class="settings-input" />
                 <ui:IntegerField name="settings-challenge-seconds-field" label="Beginner Challenge Time (sec)" value="10" class="settings-input" />
                 <ui:IntegerField name="settings-participant-turn-seconds-field" label="Player Turn Time (sec)" value="60" class="settings-input" />
+                <ui:TextField name="settings-sabotage-gift-field" label="Sabotage Gift" value="Popular Vote" class="settings-input" />
                 <ui:Label name="settings-hint-label" class="settings-hint" text="" />
 
                 <ui:VisualElement class="modal-button-row">

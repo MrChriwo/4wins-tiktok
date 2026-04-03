@@ -228,6 +228,59 @@
     color: rgb(255, 214, 160);
 }
 
+.sabotage-overlay {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background-color: rgba(0, 0, 0, 0.38);
+}
+
+.sabotage-card {
+    min-width: 520px;
+    max-width: 80%;
+    padding-top: 26px;
+    padding-bottom: 26px;
+    padding-left: 30px;
+    padding-right: 30px;
+    align-items: center;
+    border-top-left-radius: 18px;
+    border-top-right-radius: 18px;
+    border-bottom-left-radius: 18px;
+    border-bottom-right-radius: 18px;
+    background-color: rgba(32, 18, 10, 0.95);
+    border-top-color: rgba(255, 168, 82, 0.9);
+    border-right-color: rgba(255, 168, 82, 0.9);
+    border-bottom-color: rgba(140, 50, 20, 0.95);
+    border-left-color: rgba(255, 168, 82, 0.9);
+}
+
+.sabotage-avatar {
+    width: 132px;
+    height: 132px;
+    border-top-left-radius: 66px;
+    border-top-right-radius: 66px;
+    border-bottom-left-radius: 66px;
+    border-bottom-right-radius: 66px;
+    background-color: rgba(120, 90, 60, 0.8);
+    background-size: cover;
+    background-position: center;
+}
+
+.sabotage-text {
+    margin-top: 14px;
+    font-size: 44px;
+    -unity-font-style: bold;
+    color: rgb(255, 220, 170);
+    -unity-text-align: middle-center;
+    -unity-text-outline-color: rgba(255, 120, 30, 0.95);
+    -unity-text-outline-width: 2px;
+}
+
 .popup-overlay {
     position: absolute;
     left: 0;

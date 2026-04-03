@@ -22,6 +22,11 @@ namespace FourWinsTikTok.Gameplay
                 return;
             }
 
+            if (gameFlowController.IsSabotageTurnActive)
+            {
+                return;
+            }
+
             if (enableKeyboardInput)
             {
                 HandleKeyboardInput();

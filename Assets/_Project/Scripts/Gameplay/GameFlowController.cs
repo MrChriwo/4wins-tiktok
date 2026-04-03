@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Text;
 using System.Text.RegularExpressions;
 using FourWinsTikTok.AI;
 using FourWinsTikTok.Bootstrap;
@@ -44,6 +45,7 @@ namespace FourWinsTikTok.Gameplay
         public event Action<int, int, int, int> OnRoundScoreChanged;
         public event Action<PlayerSide, bool> OnRoundCompleted;
         public event Action<string> OnCommunityParticipantTurnChanged;
+        public event Action<GiftMessage> OnSabotageTriggered;
 
         private readonly System.Random _random = new System.Random();
         private IBotPlayer _botPlayer;
@@ -69,6 +71,13 @@ namespace FourWinsTikTok.Gameplay
         private bool _isPaused;
         private float _pausedRemainingSeconds;
         private PlayerSide _configuredStartingSide = PlayerSide.Community;
+        private string _sabotageGiftName = string.Empty;
+        private bool _hasPendingSabotageTurn;
+        private string _pendingSabotageUserId = string.Empty;
+        private string _pendingSabotageDisplayName = string.Empty;
+        private bool _isSabotageTurnReplacingStreamer;
+        private bool _sabotageLockedUntilNormalStreamerTurn;
+        private bool _sabotageUsedThisRound;
 
         public BoardState CurrentBoard { get; private set; }
         public GameFlowState CurrentState { get; private set; } = GameFlowState.Idle;
@@ -78,6 +87,7 @@ namespace FourWinsTikTok.Gameplay
         public int OpponentWins => _opponentWins;
         public bool IsMatchOver => _matchOver;
         public bool IsPaused => _isPaused;
+        public bool IsSabotageTurnActive => _isSabotageTurnReplacingStreamer;
         public int MatchWinsRequired => _matchWinsRequired;
         public string ActiveCommunityParticipantUserId => _activeCommunityParticipantUserId;
         public float CommunityTurnRemainingSeconds
@@ -396,6 +406,7 @@ namespace FourWinsTikTok.Gameplay
                 5,
                 300);
             _configuredStartingSide = ResolveConfiguredStartingSide();
+            _sabotageGiftName = PlayerPrefs.GetString(BootstrapKeys.SabotageGiftNamePlayerPrefsKey, "Popular Vote").Trim();
 
             bool hasPendingResume = TryConsumePendingMatchResume(out int resumedRound, out int resumedCommunityWins, out int resumedOpponentWins);
 
@@ -409,6 +420,12 @@ namespace FourWinsTikTok.Gameplay
             _streamerTurnDeadlineRealtime = 0f;
             _isPaused = false;
             _pausedRemainingSeconds = 0f;
+            _hasPendingSabotageTurn = false;
+            _pendingSabotageUserId = string.Empty;
+            _pendingSabotageDisplayName = string.Empty;
+            _isSabotageTurnReplacingStreamer = false;
+            _sabotageLockedUntilNormalStreamerTurn = false;
+            _sabotageUsedThisRound = false;
             StopAwaitParticipantsRoutine();
 
             SetState(GameFlowState.Idle);
@@ -469,6 +486,12 @@ namespace FourWinsTikTok.Gameplay
             _streamerTurnDeadlineRealtime = 0f;
             _isPaused = false;
             _pausedRemainingSeconds = 0f;
+            _hasPendingSabotageTurn = false;
+            _pendingSabotageUserId = string.Empty;
+            _pendingSabotageDisplayName = string.Empty;
+            _isSabotageTurnReplacingStreamer = false;
+            _sabotageLockedUntilNormalStreamerTurn = false;
+            _sabotageUsedThisRound = false;
 
             SetState(GameFlowState.Idle);
             ActivePlayer = PlayerSide.None;
@@ -604,6 +627,7 @@ namespace FourWinsTikTok.Gameplay
                     {
                         existing.OnChatMessageReceived -= HandleChatMessage;
                         existing.OnAdminCommandReceived -= HandleAdminCommand;
+                        existing.OnGiftReceived -= HandleGiftReceived;
                     }
 
                     _subscribedChatAdapters.RemoveAt(index);
@@ -620,6 +644,7 @@ namespace FourWinsTikTok.Gameplay
 
                 adapter.OnChatMessageReceived += HandleChatMessage;
                 adapter.OnAdminCommandReceived += HandleAdminCommand;
+                adapter.OnGiftReceived += HandleGiftReceived;
                 _subscribedChatAdapters.Add(adapter);
             }
 
@@ -666,6 +691,7 @@ namespace FourWinsTikTok.Gameplay
                 {
                     adapter.OnChatMessageReceived -= HandleChatMessage;
                     adapter.OnAdminCommandReceived -= HandleAdminCommand;
+                    adapter.OnGiftReceived -= HandleGiftReceived;
                 }
             }
 
@@ -935,6 +961,58 @@ namespace FourWinsTikTok.Gameplay
 
             if (CurrentState != GameFlowState.WaitingForCommunityVote)
             {
+                if (CurrentState == GameFlowState.WaitingForStreamerMove && _isSabotageTurnReplacingStreamer)
+                {
+                    if (!IsSameUserId(chatMessage.UserId, _activeCommunityParticipantUserId))
+                    {
+                        if (logVoteFlow)
+                        {
+                            Debug.Log($"GameFlowController: Sabotage streamer move ignored because user '{chatMessage.UserId}' is not the active sabotager.");
+                        }
+
+                        return;
+                    }
+
+                    if (!TryParseColumnFromChat(sanitizedMessage, out int sabotageColumn))
+                    {
+                        if (logVoteFlow)
+                        {
+                            Debug.Log($"GameFlowController: Sabotage message '{sanitizedMessage}' is not a valid column number.");
+                        }
+
+                        return;
+                    }
+
+                    if (CurrentBoard.IsColumnFull(sabotageColumn))
+                    {
+                        OnStatusMessage?.Invoke($"Column {sabotageColumn + 1} is full. {_activeCommunityParticipantUserId}, pick another (1-7).");
+                        return;
+                    }
+
+                    EnsureTurnTimer()?.CancelCountdown();
+                    _streamerTurnDeadlineRealtime = 0f;
+
+                    if (!TryExecuteMove(sabotageColumn, PlayerSide.Streamer))
+                    {
+                        EndAsDraw();
+                        return;
+                    }
+
+                    Trace($"SabotageMoveAccepted: user='{chatMessage.UserId}', column={sabotageColumn + 1}");
+
+                    _isSabotageTurnReplacingStreamer = false;
+                    _sabotageLockedUntilNormalStreamerTurn = true;
+                    _activeCommunityParticipantUserId = string.Empty;
+                    OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
+
+                    if (CurrentState != GameFlowState.GameOver)
+                    {
+                        BeginCommunityTurn();
+                    }
+
+                    return;
+                }
+
                 if (logVoteFlow)
                 {
                     Debug.Log("GameFlowController: Message ignored because community participant turn phase is not active.");
@@ -1022,7 +1100,10 @@ namespace FourWinsTikTok.Gameplay
             {
                 if (useLocalStreamerInsteadOfBot)
                 {
-                    BeginStreamerTurn();
+                    if (!TryBeginQueuedSabotageTurnReplacingStreamer())
+                    {
+                        BeginStreamerTurn();
+                    }
                 }
                 else
                 {
@@ -1054,6 +1135,83 @@ namespace FourWinsTikTok.Gameplay
                 case "kick":
                     HandleAdminKickCommand(adminCommand);
                     break;
+            }
+        }
+
+        private void HandleGiftReceived(GiftMessage giftMessage)
+        {
+            if (!this || !isActiveAndEnabled || _isPaused)
+            {
+                return;
+            }
+
+            if (CurrentBoard == null || CurrentState == GameFlowState.GameOver)
+            {
+                return;
+            }
+
+            if (!IsSabotageGiftMatch(giftMessage.GiftName))
+            {
+                return;
+            }
+
+            string userId = giftMessage.UserId?.Trim();
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return;
+            }
+
+            string displayName = string.IsNullOrWhiteSpace(giftMessage.DisplayName)
+                ? userId
+                : giftMessage.DisplayName.Trim();
+
+            if (_sabotageUsedThisRound)
+            {
+                if (logVoteFlow)
+                {
+                    Trace($"SabotageIgnored: already used this round. user='{displayName}'");
+                }
+
+                return;
+            }
+
+            if (_sabotageLockedUntilNormalStreamerTurn)
+            {
+                if (logVoteFlow)
+                {
+                    Trace($"SabotageIgnored: locked until normal streamer turn. user='{displayName}'");
+                }
+
+                return;
+            }
+
+            if (_isSabotageTurnReplacingStreamer || _hasPendingSabotageTurn)
+            {
+                if (logVoteFlow)
+                {
+                    Trace($"SabotageIgnored: already pending/active. user='{displayName}'");
+                }
+
+                return;
+            }
+
+            _hasPendingSabotageTurn = true;
+            _pendingSabotageUserId = userId;
+            _pendingSabotageDisplayName = displayName;
+            _sabotageUsedThisRound = true;
+            OnSabotageTriggered?.Invoke(giftMessage);
+
+            if (CurrentState == GameFlowState.WaitingForStreamerMove)
+            {
+                EnsureTurnTimer()?.CancelCountdown();
+                _streamerTurnDeadlineRealtime = 0f;
+                TryBeginQueuedSabotageTurnReplacingStreamer();
+                return;
+            }
+
+            if (CurrentState == GameFlowState.WaitingForCommunityVote)
+            {
+                return;
             }
         }
 
@@ -1283,6 +1441,16 @@ namespace FourWinsTikTok.Gameplay
             if (!TryExecuteMove(columnIndex, PlayerSide.Streamer))
             {
                 return false;
+            }
+
+            if (_isSabotageTurnReplacingStreamer)
+            {
+                _isSabotageTurnReplacingStreamer = false;
+                _sabotageLockedUntilNormalStreamerTurn = true;
+            }
+            else
+            {
+                _sabotageLockedUntilNormalStreamerTurn = false;
             }
 
             _streamerTurnDeadlineRealtime = 0f;
@@ -1596,6 +1764,11 @@ namespace FourWinsTikTok.Gameplay
 
         private void BeginStreamerTurn()
         {
+            if (TryBeginQueuedSabotageTurnReplacingStreamer())
+            {
+                return;
+            }
+
             List<int> validColumns = CurrentBoard.GetValidColumns();
             if (validColumns.Count == 0)
             {
@@ -1640,6 +1813,83 @@ namespace FourWinsTikTok.Gameplay
             int timeoutColumn = validColumns[_random.Next(validColumns.Count)];
             OnStatusMessage?.Invoke($"Streamer timeout. Auto move in column {timeoutColumn + 1}.");
             TrySubmitStreamerMoveFromColumnIndex(timeoutColumn);
+        }
+
+        private bool TryBeginQueuedSabotageTurnReplacingStreamer()
+        {
+            if (!_hasPendingSabotageTurn || string.IsNullOrWhiteSpace(_pendingSabotageUserId))
+            {
+                return false;
+            }
+
+            _isSabotageTurnReplacingStreamer = true;
+
+            string sabotageUserId = _pendingSabotageUserId;
+            string sabotageDisplayName = string.IsNullOrWhiteSpace(_pendingSabotageDisplayName)
+                ? sabotageUserId
+                : _pendingSabotageDisplayName;
+
+            _hasPendingSabotageTurn = false;
+            _pendingSabotageUserId = string.Empty;
+            _pendingSabotageDisplayName = string.Empty;
+            _sabotageLockedUntilNormalStreamerTurn = true;
+
+            SetState(GameFlowState.WaitingForStreamerMove);
+            ActivePlayer = PlayerSide.Streamer;
+            _activeCommunityParticipantIndex = -1;
+            _activeCommunityParticipantUserId = sabotageUserId;
+            _streamerTurnDeadlineRealtime = 0f;
+            _communityTurnDeadlineRealtime = 0f;
+            StopAwaitParticipantsRoutine();
+            OnCommunityParticipantTurnChanged?.Invoke(_activeCommunityParticipantUserId);
+
+            float streamerDuration = Mathf.Max(0f, _participantTurnSecondsRuntime);
+            _streamerTurnDeadlineRealtime = streamerDuration > 0f
+                ? Time.realtimeSinceStartup + streamerDuration
+                : 0f;
+
+            OnStatusMessage?.Invoke($"{sabotageDisplayName} is up! Send 1-7.");
+            EnsureTurnTimer()?.StartCountdown(streamerDuration);
+            OnTimerChanged?.Invoke(streamerDuration);
+            return true;
+        }
+
+        private bool IsSabotageGiftMatch(string receivedGiftName)
+        {
+            string requiredNormalized = NormalizeGiftName(_sabotageGiftName);
+            string receivedNormalized = NormalizeGiftName(receivedGiftName);
+
+            if (string.IsNullOrWhiteSpace(requiredNormalized) || string.IsNullOrWhiteSpace(receivedNormalized))
+            {
+                return false;
+            }
+
+            if (string.Equals(requiredNormalized, receivedNormalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
+        }
+
+        private static string NormalizeGiftName(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return string.Empty;
+            }
+
+            StringBuilder builder = new StringBuilder(value.Length);
+            for (int index = 0; index < value.Length; index++)
+            {
+                char character = char.ToLowerInvariant(value[index]);
+                if (char.IsLetterOrDigit(character))
+                {
+                    builder.Append(character);
+                }
+            }
+
+            return builder.ToString();
         }
 
         private bool TryExecuteMove(int column, PlayerSide side)
