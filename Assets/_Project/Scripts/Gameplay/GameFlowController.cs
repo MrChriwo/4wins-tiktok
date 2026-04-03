@@ -397,9 +397,11 @@ namespace FourWinsTikTok.Gameplay
                 300);
             _configuredStartingSide = ResolveConfiguredStartingSide();
 
-            _currentRound = 1;
-            _communityWins = 0;
-            _opponentWins = 0;
+            bool hasPendingResume = TryConsumePendingMatchResume(out int resumedRound, out int resumedCommunityWins, out int resumedOpponentWins);
+
+            _currentRound = hasPendingResume ? Mathf.Max(1, resumedRound) : 1;
+            _communityWins = hasPendingResume ? Mathf.Clamp(resumedCommunityWins, 0, _matchWinsRequired) : 0;
+            _opponentWins = hasPendingResume ? Mathf.Clamp(resumedOpponentWins, 0, _matchWinsRequired) : 0;
             _matchOver = false;
             _activeCommunityParticipantIndex = -1;
             _activeCommunityParticipantUserId = string.Empty;
@@ -416,6 +418,30 @@ namespace FourWinsTikTok.Gameplay
             PublishScoreState();
 
             BeginConfiguredStartingTurn();
+        }
+
+        private static bool TryConsumePendingMatchResume(out int round, out int communityWins, out int opponentWins)
+        {
+            round = 1;
+            communityWins = 0;
+            opponentWins = 0;
+
+            int pending = PlayerPrefs.GetInt(BootstrapKeys.MatchResumePendingPlayerPrefsKey, 0);
+            if (pending != 1)
+            {
+                return false;
+            }
+
+            round = PlayerPrefs.GetInt(BootstrapKeys.MatchResumeRoundPlayerPrefsKey, 1);
+            communityWins = PlayerPrefs.GetInt(BootstrapKeys.MatchResumeCommunityWinsPlayerPrefsKey, 0);
+            opponentWins = PlayerPrefs.GetInt(BootstrapKeys.MatchResumeOpponentWinsPlayerPrefsKey, 0);
+
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumePendingPlayerPrefsKey);
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumeRoundPlayerPrefsKey);
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumeCommunityWinsPlayerPrefsKey);
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumeOpponentWinsPlayerPrefsKey);
+            PlayerPrefs.Save();
+            return true;
         }
 
         public void StartNextRound()

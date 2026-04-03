@@ -273,6 +273,12 @@ namespace FourWinsTikTok.Bootstrap
             _statusLabel.text = "Preloading game scene...";
             _progressBar.value = 0f;
 
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumePendingPlayerPrefsKey);
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumeRoundPlayerPrefsKey);
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumeCommunityWinsPlayerPrefsKey);
+            PlayerPrefs.DeleteKey(BootstrapKeys.MatchResumeOpponentWinsPlayerPrefsKey);
+            PlayerPrefs.Save();
+
             bool requireConnectionThisRun = requireTikTokConnection;
 
             AsyncOperation loadOperation = loadAdditively

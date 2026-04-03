@@ -7,6 +7,7 @@ using FourWinsTikTok.Gameplay;
 using FourWinsTikTok.TikTok;
 using FourWinsTikTok.Voting;
 using TikTokLiveUnity;
+using System.IO;
 using UnityEngine;
 using UnityEngine.Networking;
 using UnityEngine.SceneManagement;
@@ -24,6 +25,7 @@ namespace FourWinsTikTok.UI
         [SerializeField] private ConnectFourUIConfig uiConfig;
         [SerializeField] private bool renderBoardInUi;
         [SerializeField] private string startSceneName = "Start";
+        [SerializeField] private string registrationSceneName = "Registration";
 
         [Header("Runtime Layout Debug")]
         [SerializeField] private bool enableRuntimeLayoutDebug = true;
@@ -72,6 +74,7 @@ namespace FourWinsTikTok.UI
         private float _lastDebugDiscSizeOffset;
         private int _lastCommunityWins = -1;
         private int _lastOpponentWins = -1;
+        private bool _nextRoundRequiresRegistration;
 
         private void Update()
         {
@@ -530,6 +533,7 @@ namespace FourWinsTikTok.UI
 
         private void HandleRoundCompleted(PlayerSide winner, bool isMatchOver)
         {
+            _nextRoundRequiresRegistration = !isMatchOver && winner != PlayerSide.None;
             string communityName = GetCommunityDisplayName();
             string opponentName = GetStreamerDisplayName();
 
@@ -546,7 +550,11 @@ namespace FourWinsTikTok.UI
 
             if (_nextRoundButton != null)
             {
-                _nextRoundButton.text = isMatchOver ? "New Match" : "Next Round";
+                _nextRoundButton.text = isMatchOver
+                    ? "New Match"
+                    : _nextRoundRequiresRegistration
+                        ? "Start New Registration"
+                        : "Next Round";
             }
 
             SetWinnerPopupVisible(true);
@@ -554,12 +562,135 @@ namespace FourWinsTikTok.UI
 
         private void HandleNextRoundClicked()
         {
+            Debug.Log($"ConnectFourUIController: NextRound clicked. requiresRegistration={_nextRoundRequiresRegistration}, registrationSceneName='{registrationSceneName}'.");
+
+            if (_nextRoundRequiresRegistration)
+            {
+                PersistMatchProgressForRegistrationLoop();
+                if (!TryLoadRegistrationScene())
+                {
+                    if (_statusLabel != null)
+                    {
+                        _statusLabel.text = "Registration scene could not be loaded. Check scene name/build settings.";
+                    }
+
+                    return;
+                }
+
+                SetWinnerPopupVisible(false);
+                return;
+            }
+
             if (gameFlowController != null)
             {
                 gameFlowController.StartNextRound();
             }
 
+            _nextRoundRequiresRegistration = false;
             SetWinnerPopupVisible(false);
+        }
+
+        private void PersistMatchProgressForRegistrationLoop()
+        {
+            if (gameFlowController == null)
+            {
+                return;
+            }
+
+            int nextRound = Mathf.Max(1, gameFlowController.CurrentRound + 1);
+            PlayerPrefs.SetInt(BootstrapKeys.MatchResumePendingPlayerPrefsKey, 1);
+            PlayerPrefs.SetInt(BootstrapKeys.MatchResumeRoundPlayerPrefsKey, nextRound);
+            PlayerPrefs.SetInt(BootstrapKeys.MatchResumeCommunityWinsPlayerPrefsKey, gameFlowController.CommunityWins);
+            PlayerPrefs.SetInt(BootstrapKeys.MatchResumeOpponentWinsPlayerPrefsKey, gameFlowController.OpponentWins);
+            PlayerPrefs.Save();
+        }
+
+        private bool TryLoadRegistrationScene()
+        {
+            string configuredScene = string.IsNullOrWhiteSpace(registrationSceneName)
+                ? "Registration"
+                : registrationSceneName.Trim();
+
+            int sceneIndex = ResolveSceneBuildIndex(configuredScene);
+            if (sceneIndex >= 0)
+            {
+                Debug.Log($"ConnectFourUIController: Loading registration scene by index {sceneIndex} (configured='{configuredScene}').");
+                SceneManager.LoadScene(sceneIndex, LoadSceneMode.Single);
+                return true;
+            }
+
+            const string fallbackSceneName = "Registration";
+            if (!string.Equals(configuredScene, fallbackSceneName, System.StringComparison.OrdinalIgnoreCase))
+            {
+                int fallbackIndex = ResolveSceneBuildIndex(fallbackSceneName);
+                if (fallbackIndex >= 0)
+                {
+                    Debug.LogWarning($"ConnectFourUIController: Scene '{configuredScene}' not loadable. Falling back to '{fallbackSceneName}' (index {fallbackIndex}).");
+                    SceneManager.LoadScene(fallbackIndex, LoadSceneMode.Single);
+                    return true;
+                }
+            }
+
+            const string fallbackScenePath = "Assets/_Project/Scenes/Registration.unity";
+            int fallbackPathIndex = ResolveSceneBuildIndex(fallbackScenePath);
+            if (fallbackPathIndex >= 0)
+            {
+                Debug.LogWarning($"ConnectFourUIController: Scene '{configuredScene}' not loadable. Falling back to '{fallbackScenePath}' (index {fallbackPathIndex}).");
+                SceneManager.LoadScene(fallbackPathIndex, LoadSceneMode.Single);
+                return true;
+            }
+
+            Debug.LogError($"ConnectFourUIController: Registration scene load failed. Configured='{configuredScene}'. Available build scenes: {GetBuildScenesDebugList()}");
+            return false;
+        }
+
+        private static int ResolveSceneBuildIndex(string configuredScene)
+        {
+            if (string.IsNullOrWhiteSpace(configuredScene))
+            {
+                return -1;
+            }
+
+            string normalized = configuredScene.Trim();
+            string configuredFileName = Path.GetFileNameWithoutExtension(normalized);
+
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                string scenePath = SceneUtility.GetScenePathByBuildIndex(index);
+                string sceneFileName = Path.GetFileNameWithoutExtension(scenePath);
+
+                if (string.Equals(scenePath, normalized, System.StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(sceneFileName, normalized, System.StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(sceneFileName, configuredFileName, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private static string GetBuildScenesDebugList()
+        {
+            if (SceneManager.sceneCountInBuildSettings <= 0)
+            {
+                return "<none>";
+            }
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+            for (int index = 0; index < SceneManager.sceneCountInBuildSettings; index++)
+            {
+                if (index > 0)
+                {
+                    builder.Append(" | ");
+                }
+
+                builder.Append(index);
+                builder.Append(':');
+                builder.Append(SceneUtility.GetScenePathByBuildIndex(index));
+            }
+
+            return builder.ToString();
         }
 
         private void HandlePauseClicked()

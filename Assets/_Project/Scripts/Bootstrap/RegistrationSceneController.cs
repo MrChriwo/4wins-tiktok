@@ -309,11 +309,7 @@ namespace FourWinsTikTok.Bootstrap
 
         private IEnumerator RegistrationCountdownRoutine()
         {
-            _preloadGameOperation = SceneManager.LoadSceneAsync(gameplaySceneName, LoadSceneMode.Single);
-            if (_preloadGameOperation != null)
-            {
-                _preloadGameOperation.allowSceneActivation = false;
-            }
+            _preloadGameOperation = null;
 
             while (_remainingSeconds > 0f)
             {
