@@ -12,6 +12,11 @@ services:
       - PORT=3010
       - BRIDGE_LOG_LEVEL=info
       - BRIDGE_EVENT_BUFFER_SIZE=1500
+      - BRIDGE_ADMIN_DB_PATH=/app/data/admins.sqlite
+      - BRIDGE_ADMIN_ASSIGNMENTS=jonasderksen.musik=ichriwo
+      - BRIDGE_GLOBAL_ADMIN_USERNAMES=ichriwo
+    volumes:
+      - ./data:/app/data
     labels:
       - traefik.enable=true
       - traefik.docker.network=web

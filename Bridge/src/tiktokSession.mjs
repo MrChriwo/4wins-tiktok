@@ -41,6 +41,68 @@ function extractChatMessage(payload) {
   ).trim();
 }
 
+function parseAdminCommand(message, fallbackUserId) {
+  const normalizedMessage = String(message || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/^\/\s+/, "/");
+
+  if (!normalizedMessage.startsWith("/")) {
+    return null;
+  }
+
+  const parts = normalizedMessage.split(" ").filter(Boolean);
+  if (parts.length === 0) {
+    return null;
+  }
+
+  const command = String(parts[0] || "").replace(/^\//, "").toLowerCase();
+  if (!command) {
+    return null;
+  }
+
+  if (command === "register") {
+    const target = normalizeUserId(parts[1]) || normalizeUserId(fallbackUserId);
+    if (!target) {
+      return null;
+    }
+
+    return {
+      command: "register",
+      targetUserId: target,
+      targetDisplayName: String(parts[1] || fallbackUserId || target).replace(/^@+/, "").trim()
+    };
+  }
+
+  if (command === "takeover") {
+    const issuer = normalizeUserId(fallbackUserId);
+    if (!issuer) {
+      return null;
+    }
+
+    return {
+      command: "takeover",
+      targetUserId: issuer,
+      targetDisplayName: String(fallbackUserId || issuer).replace(/^@+/, "").trim()
+    };
+  }
+
+  if (command === "kick") {
+    const target = normalizeUserId(parts[1]);
+    if (!target) {
+      return null;
+    }
+
+    return {
+      command: "kick",
+      targetUserId: target,
+      targetDisplayName: String(parts[1] || target).replace(/^@+/, "").trim()
+    };
+  }
+
+  return null;
+}
+
 function isDuplicateChat(session, userId, message) {
   const now = Date.now();
   const signature = `${userId}|${message}`;
@@ -76,7 +138,7 @@ function collectUserAliases(payload) {
   return aliases;
 }
 
-export async function connectTikTokSession({ session, store, logger, registrationGiftName }) {
+export async function connectTikTokSession({ session, store, logger, registrationGiftName, adminStore }) {
   store.resetSessionLifecycle?.(session);
 
   const requestedGiftNormalized = normalizeGiftName(registrationGiftName || "Rose") || "rose";
@@ -106,6 +168,36 @@ export async function connectTikTokSession({ session, store, logger, registratio
     const aliases = collectUserAliases(data);
     if (normalizedUserId) {
       aliases.add(normalizedUserId);
+    }
+
+    const adminCommand = parseAdminCommand(message, normalizedUserId || userId);
+    if (
+      adminCommand
+      && aliases.size > 0
+      && adminStore
+      && Array.from(aliases).some(alias => adminStore.isAdminForHost(session.hostId, alias))
+    ) {
+      const primaryUserId = normalizedUserId || Array.from(aliases)[0];
+      store.appendEvent(session, {
+        type: "admin_command",
+        command: adminCommand.command,
+        userId: primaryUserId,
+        displayName,
+        targetUserId: adminCommand.targetUserId,
+        targetDisplayName: adminCommand.targetDisplayName,
+        avatarUrl
+      });
+
+      logger.info(
+        {
+          hostId: session.hostId,
+          command: adminCommand.command,
+          issuedBy: primaryUserId,
+          targetUserId: adminCommand.targetUserId
+        },
+        "admin command accepted"
+      );
+      return;
     }
 
     if (aliases.size === 0 || !message) {
@@ -209,6 +301,13 @@ export async function connectTikTokSession({ session, store, logger, registratio
     session.connected = true;
     store.markConnected?.(session);
     store.appendEvent(session, { type: "connected", target: session.hostId });
+    logger.info(
+      {
+        hostId: session.hostId,
+        adminUsers: adminStore?.listAdminsForHost?.(session.hostId) || []
+      },
+      "session started with sqlite-admin authorization"
+    );
     logger.info(`connection to ${session.hostId} established`);
   } finally {
     session.connecting = false;

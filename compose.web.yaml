@@ -1,0 +1,21 @@
+services:
+  tt4wins-web:
+    container_name: tt4wins-web
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    volumes:
+      - ./4WinsWeb:/usr/share/nginx/html:ro
+      - ./4WinsWeb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=web
+      - traefik.http.routers.tt4wins-web.rule=Host(`tt4wins.arrayhive.dev`)
+      - traefik.http.routers.tt4wins-web.entrypoints=websecure
+      - traefik.http.routers.tt4wins-web.tls=true
+      - traefik.http.services.tt4wins-web.loadbalancer.server.port=80
+    networks:
+      - web
+
+networks:
+  web:
+    external: true

@@ -13,4 +13,9 @@ services:
       - BRIDGE_LOG_LEVEL=debug
       - BRIDGE_EVENT_BUFFER_SIZE=1500
       - BRIDGE_SESSION_INACTIVITY_TIMEOUT_SECONDS=20
+      - BRIDGE_ADMIN_DB_PATH=/app/data/admins.sqlite
+      - BRIDGE_ADMIN_ASSIGNMENTS=jonasderksen.musik=ichriwo
+      - BRIDGE_GLOBAL_ADMIN_USERNAMES=ichriwo
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped

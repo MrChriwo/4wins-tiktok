@@ -151,6 +151,7 @@ namespace FourWinsTikTok.UI
 
             _participantRegistry = ParticipantRegistryService.EnsureInstance();
             _participantRegistry.OnParticipantRegistered += HandleParticipantRegistered;
+            _participantRegistry.OnParticipantRemoved += HandleParticipantRemoved;
             _participantRegistry.OnCleared += HandleParticipantsCleared;
             RebuildParticipantList();
 
@@ -189,6 +190,7 @@ namespace FourWinsTikTok.UI
             if (_participantRegistry != null)
             {
                 _participantRegistry.OnParticipantRegistered -= HandleParticipantRegistered;
+                _participantRegistry.OnParticipantRemoved -= HandleParticipantRemoved;
                 _participantRegistry.OnCleared -= HandleParticipantsCleared;
             }
 
@@ -649,6 +651,29 @@ namespace FourWinsTikTok.UI
         private void HandleParticipantRegistered(ParticipantInfo participant)
         {
             AddParticipantRow(participant);
+        }
+
+        private void HandleParticipantRemoved(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return;
+            }
+
+            _participantsByUserId.Remove(userId);
+
+            if (_participantRowsByUserId.TryGetValue(userId, out VisualElement row))
+            {
+                row?.RemoveFromHierarchy();
+                _participantRowsByUserId.Remove(userId);
+            }
+
+            if (string.Equals(_activeParticipantUserId, userId, System.StringComparison.OrdinalIgnoreCase))
+            {
+                _activeParticipantUserId = string.Empty;
+                StopActiveParticipantPulse();
+                SetActivePlayerDisplay(string.Empty, null);
+            }
         }
 
         private void AddParticipantRow(ParticipantInfo participant)

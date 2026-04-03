@@ -44,6 +44,63 @@ Health endpoint:
 - `BRIDGE_EVENT_BUFFER_SIZE` (default `1500`)
 - `BRIDGE_REGISTRATION_GIFT_NAME` (default `Rose`)
 - `BRIDGE_SESSION_INACTIVITY_TIMEOUT_SECONDS` (default `20`)
+- `BRIDGE_ADMIN_DB_PATH` (default `./data/admins.sqlite`)
+- `BRIDGE_ADMIN_ASSIGNMENTS` (seed list per streamer, format `streamerA=admin1,admin2;streamerB=mod1`)
+- `BRIDGE_GLOBAL_ADMIN_USERNAMES` (comma-separated global admins, e.g. `ichriwo,supermod`)
+
+### Admin authorization (SQLite)
+
+- Admin rights are checked against SQLite table `admin_host_users`.
+- Optional global admins are checked against SQLite table `admin_global_users`.
+- Effective admin check is: global admin OR host-scoped admin for active `hostId`.
+- At startup, assignments from `BRIDGE_ADMIN_ASSIGNMENTS` are inserted with `INSERT OR IGNORE`.
+- At startup, `BRIDGE_GLOBAL_ADMIN_USERNAMES` are inserted with `INSERT OR IGNORE`.
+- Admin commands are accepted only when issuer is admin for the active `hostId` (case-insensitive, `@` prefix ignored).
+
+Supported commands from chat:
+
+- `/register`
+- `/register <username>`
+- `/takeover`
+- `/kick <username>`
+
+`/ register <username>` (with space after slash) is accepted as well.
+
+### Database creation
+
+No manual migration step is needed.
+
+- On bridge startup, SQLite file is created automatically at `BRIDGE_ADMIN_DB_PATH`.
+- Required tables `admin_host_users` and `admin_global_users` are auto-created.
+- Seed assignments from `BRIDGE_ADMIN_ASSIGNMENTS` are inserted with `INSERT OR IGNORE`.
+- Global admins from `BRIDGE_GLOBAL_ADMIN_USERNAMES` are inserted with `INSERT OR IGNORE`.
+
+Example:
+
+- `BRIDGE_ADMIN_DB_PATH=/app/data/admins.sqlite`
+- `BRIDGE_ADMIN_ASSIGNMENTS=streamerA=admin1,admin2;streamerB=mod1`
+- `BRIDGE_GLOBAL_ADMIN_USERNAMES=ichriwo`
+
+### Quick test flow
+
+1. Start bridge (dev compose):
+
+```bash
+cd Bridge
+podman compose -f compose.dev.yaml up -d --build
+podman logs -f 4wins-bridge-dev
+```
+
+2. Check startup logs for `admin sqlite store initialized` and assignment list.
+
+3. Connect Unity/bridge with `hostId=streamerA`.
+
+4. From TikTok chat:
+	- as `admin1`: `/register testuser`, `/takeover`, `/kick testuser` -> must work
+	- as global admin (`ichriwo`): same commands for **any hostId** -> must work
+	- as non-admin: same commands -> must be ignored
+
+5. Stop/restart bridge and verify commands still work (proves DB persistence via `./data:/app/data`).
 
 ---
 

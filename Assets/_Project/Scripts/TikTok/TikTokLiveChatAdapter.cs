@@ -36,6 +36,7 @@ namespace FourWinsTikTok.TikTok
 
         public event Action<ChatMessage> OnChatMessageReceived;
         public event Action<GiftMessage> OnGiftReceived;
+        public event Action<AdminCommandMessage> OnAdminCommandReceived;
         public event Action<bool, string> OnConnectionStateChanged;
 
         private TikTokLiveManager Manager => TikTokLiveManager.Instance;
@@ -50,6 +51,7 @@ namespace FourWinsTikTok.TikTok
         private Coroutine _bridgePollRoutine;
         private bool _isQuitting;
         private bool _manualBridgeDisconnect;
+        private bool _resetCursorOnNextBridgeConnect;
         private float _nextBridgeReconnectAt;
 
         public bool IsConnected => ShouldUseBridgeRuntime()
@@ -201,6 +203,7 @@ namespace FourWinsTikTok.TikTok
             if (ShouldUseBridgeRuntime())
             {
                 _manualBridgeDisconnect = true;
+                _resetCursorOnNextBridgeConnect = true;
                 string hostId = _bridgeHostId;
                 StopBridgePolling(true);
 
@@ -426,6 +429,14 @@ namespace FourWinsTikTok.TikTok
             {
                 LogInfo($"Bridge already connected for '{normalizedHostId}', reconnect skipped.");
                 return;
+            }
+
+            bool hostChanged = !string.Equals(_bridgeHostId, normalizedHostId, StringComparison.OrdinalIgnoreCase);
+            if (hostChanged || _resetCursorOnNextBridgeConnect)
+            {
+                _bridgeCursor = 0;
+                _resetCursorOnNextBridgeConnect = false;
+                LogInfo($"Bridge cursor reset for new session. host='{normalizedHostId}'.");
             }
 
             StopBridgePolling(false);
@@ -671,6 +682,26 @@ namespace FourWinsTikTok.TikTok
                         OnConnectionStateChanged?.Invoke(false, string.Empty);
                         break;
                     }
+
+                    case "admin_command":
+                    {
+                        if (string.IsNullOrWhiteSpace(bridgeEvent.command) || string.IsNullOrWhiteSpace(bridgeEvent.userId))
+                        {
+                            break;
+                        }
+
+                        string issuedByDisplayName = string.IsNullOrWhiteSpace(bridgeEvent.displayName)
+                            ? bridgeEvent.userId
+                            : bridgeEvent.displayName;
+
+                        OnAdminCommandReceived?.Invoke(new AdminCommandMessage(
+                            bridgeEvent.command.Trim().ToLowerInvariant(),
+                            bridgeEvent.userId,
+                            issuedByDisplayName,
+                            bridgeEvent.targetUserId,
+                            bridgeEvent.targetDisplayName));
+                        break;
+                    }
                 }
             }
         }
@@ -782,11 +813,14 @@ namespace FourWinsTikTok.TikTok
         {
             public long id;
             public string type;
+            public string command;
             public string userId;
             public string displayName;
             public string message;
             public string giftName;
             public string avatarUrl;
+            public string targetUserId;
+            public string targetDisplayName;
         }
     }
 }

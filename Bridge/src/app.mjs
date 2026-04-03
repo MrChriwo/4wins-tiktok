@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import { createBridgeRouter } from "./routes/bridgeRoutes.mjs";
 
-export function createApp({ store, logger, config }) {
+export function createApp({ store, logger, config, adminStore }) {
   const app = express();
 
   app.use(cors());
@@ -12,7 +12,7 @@ export function createApp({ store, logger, config }) {
     res.json({ ok: true });
   });
 
-  app.use("/bridge", createBridgeRouter({ store, logger, config }));
+  app.use("/bridge", createBridgeRouter({ store, logger, config, adminStore }));
 
   return app;
 }

@@ -171,6 +171,7 @@ namespace FourWinsTikTok.Bootstrap
                 }
 
                 adapter.OnGiftReceived += HandleGiftReceived;
+                adapter.OnAdminCommandReceived += HandleAdminCommandReceived;
 #if UNITY_EDITOR
                 adapter.OnChatMessageReceived += HandleChatMessage;
 #endif
@@ -243,6 +244,7 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             adapter.OnGiftReceived -= HandleGiftReceived;
+                adapter.OnAdminCommandReceived -= HandleAdminCommandReceived;
 #if UNITY_EDITOR
             adapter.OnChatMessageReceived -= HandleChatMessage;
 #endif
@@ -337,6 +339,62 @@ namespace FourWinsTikTok.Bootstrap
             else
             {
                 Debug.Log($"RegistrationSceneController: Gift matched but participant '{giftMessage.UserId}' was already registered.");
+            }
+        }
+
+        private void HandleAdminCommandReceived(AdminCommandMessage adminCommand)
+        {
+            if (adminCommand.Command == null)
+            {
+                return;
+            }
+
+            switch (adminCommand.Command)
+            {
+                case "register":
+                    HandleAdminRegisterDuringRegistration(adminCommand);
+                    break;
+                case "kick":
+                    HandleAdminKickDuringRegistration(adminCommand);
+                    break;
+            }
+        }
+
+        private void HandleAdminRegisterDuringRegistration(AdminCommandMessage adminCommand)
+        {
+            if (_registrationClosed)
+            {
+                return;
+            }
+
+            string userId = string.IsNullOrWhiteSpace(adminCommand.TargetUserId)
+                ? adminCommand.IssuedByUserId
+                : adminCommand.TargetUserId;
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return;
+            }
+
+            string displayName = string.IsNullOrWhiteSpace(adminCommand.TargetDisplayName)
+                ? userId
+                : adminCommand.TargetDisplayName;
+
+            if (_registry.TryRegisterParticipant(userId, displayName, null, null, out _))
+            {
+                _statusLabel.text = $"Registered participants: {_registry.Count}";
+            }
+        }
+
+        private void HandleAdminKickDuringRegistration(AdminCommandMessage adminCommand)
+        {
+            if (_registrationClosed || string.IsNullOrWhiteSpace(adminCommand.TargetUserId))
+            {
+                return;
+            }
+
+            if (_registry.RemoveParticipant(adminCommand.TargetUserId))
+            {
+                _statusLabel.text = $"Registered participants: {_registry.Count}";
             }
         }
 

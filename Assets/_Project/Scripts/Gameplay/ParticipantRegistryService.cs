@@ -21,6 +21,7 @@ namespace FourWinsTikTok.Gameplay
         }
 
         public event Action<ParticipantInfo> OnParticipantRegistered;
+        public event Action<string> OnParticipantRemoved;
         public event Action OnCleared;
 
         private readonly Dictionary<string, ParticipantInfo> _participantsByUserId =
@@ -69,6 +70,22 @@ namespace FourWinsTikTok.Gameplay
             participant = new ParticipantInfo(userId, string.IsNullOrWhiteSpace(displayName) ? userId : displayName, avatarPicture, avatarUrl);
             _participantsByUserId[userId] = participant;
             OnParticipantRegistered?.Invoke(participant);
+            return true;
+        }
+
+        public bool RemoveParticipant(string userId)
+        {
+            if (string.IsNullOrWhiteSpace(userId))
+            {
+                return false;
+            }
+
+            if (!_participantsByUserId.Remove(userId))
+            {
+                return false;
+            }
+
+            OnParticipantRemoved?.Invoke(userId);
             return true;
         }
     }

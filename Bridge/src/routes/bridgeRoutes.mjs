@@ -114,7 +114,7 @@ async function normalizeAvatarForUnity({ body, contentType, logger, sourceUrl })
   }
 }
 
-export function createBridgeRouter({ store, logger, config }) {
+export function createBridgeRouter({ store, logger, config, adminStore }) {
   const router = express.Router();
 
   router.get("/status", (req, res) => {
@@ -154,7 +154,8 @@ export function createBridgeRouter({ store, logger, config }) {
         session,
         store,
         logger,
-        registrationGiftName: registrationGiftName || config?.registrationGiftName
+        registrationGiftName: registrationGiftName || config?.registrationGiftName,
+        adminStore
       });
       store.markConnected(session);
       return res.json({ ok: true, hostId: session.hostId });

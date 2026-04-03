@@ -21,7 +21,6 @@ namespace FourWinsTikTok.Gameplay
         [Header("Config")]
         [SerializeField] private ConnectFourGameConfig gameConfig;
         [SerializeField, Min(5f)] private float communityParticipantTurnSeconds = 60f;
-        [SerializeField, Min(5f)] private float streamerTurnSeconds = 60f;
 
         [Header("References")]
         [SerializeField] private TurnTimer turnTimer;
@@ -163,6 +162,7 @@ namespace FourWinsTikTok.Gameplay
             if (_participantRegistry != null)
             {
                 _participantRegistry.OnParticipantRegistered += HandleParticipantRegistered;
+                _participantRegistry.OnParticipantRemoved += HandleParticipantRemoved;
                 _participantRegistry.OnCleared += HandleParticipantsCleared;
             }
         }
@@ -195,6 +195,7 @@ namespace FourWinsTikTok.Gameplay
             if (_participantRegistry != null)
             {
                 _participantRegistry.OnParticipantRegistered -= HandleParticipantRegistered;
+                _participantRegistry.OnParticipantRemoved -= HandleParticipantRemoved;
                 _participantRegistry.OnCleared -= HandleParticipantsCleared;
             }
 
@@ -549,7 +550,12 @@ namespace FourWinsTikTok.Gameplay
                 TikTokLiveChatAdapter existing = _subscribedChatAdapters[index];
                 if (existing == null || System.Array.IndexOf(adapters, existing) < 0)
                 {
-                    existing.OnChatMessageReceived -= HandleChatMessage;
+                    if (existing != null)
+                    {
+                        existing.OnChatMessageReceived -= HandleChatMessage;
+                        existing.OnAdminCommandReceived -= HandleAdminCommand;
+                    }
+
                     _subscribedChatAdapters.RemoveAt(index);
                 }
             }
@@ -563,6 +569,7 @@ namespace FourWinsTikTok.Gameplay
                 }
 
                 adapter.OnChatMessageReceived += HandleChatMessage;
+                adapter.OnAdminCommandReceived += HandleAdminCommand;
                 _subscribedChatAdapters.Add(adapter);
             }
 
@@ -608,6 +615,7 @@ namespace FourWinsTikTok.Gameplay
                 if (adapter != null)
                 {
                     adapter.OnChatMessageReceived -= HandleChatMessage;
+                    adapter.OnAdminCommandReceived -= HandleAdminCommand;
                 }
             }
 
@@ -716,6 +724,44 @@ namespace FourWinsTikTok.Gameplay
             }
 
             _activeCommunityParticipantIndex = -1;
+            StopAwaitParticipantsRoutine();
+            AdvanceToNextCommunityParticipant();
+        }
+
+        private void HandleParticipantRemoved(string removedUserId)
+        {
+            if (string.IsNullOrWhiteSpace(removedUserId))
+            {
+                return;
+            }
+
+            if (CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            bool removedActiveParticipant = IsSameUserId(removedUserId, _activeCommunityParticipantUserId);
+
+            RefreshCommunityParticipants();
+
+            if (!removedActiveParticipant)
+            {
+                return;
+            }
+
+            EnsureTurnTimer()?.CancelCountdown();
+            _communityTurnDeadlineRealtime = 0f;
+            _activeCommunityParticipantUserId = string.Empty;
+            _activeCommunityParticipantIndex = -1;
+            OnCommunityParticipantTurnChanged?.Invoke(string.Empty);
+
+            if (_communityTurnParticipants.Count == 0)
+            {
+                OnTimerChanged?.Invoke(0f);
+                StartAwaitParticipantsRoutine();
+                return;
+            }
+
             StopAwaitParticipantsRoutine();
             AdvanceToNextCommunityParticipant();
         }
@@ -832,13 +878,6 @@ namespace FourWinsTikTok.Gameplay
 
             string sanitizedMessage = chatMessage.Message?.Trim();
 
-#if UNITY_EDITOR
-            if (TryHandleEditorAdminCommand(chatMessage, sanitizedMessage))
-            {
-                return;
-            }
-#endif
-
             if (logVoteFlow)
             {
                 Debug.Log($"GameFlowController: Chat received user='{chatMessage.UserId}', message='{sanitizedMessage}', state='{CurrentState}', active='{_activeCommunityParticipantUserId}', participants={_communityTurnParticipants.Count}, remaining={CommunityTurnRemainingSeconds:0.0}s.");
@@ -942,6 +981,123 @@ namespace FourWinsTikTok.Gameplay
             }
         }
 
+        private void HandleAdminCommand(AdminCommandMessage adminCommand)
+        {
+            if (!this || !isActiveAndEnabled || _isPaused)
+            {
+                return;
+            }
+
+            if (CurrentBoard == null || string.IsNullOrWhiteSpace(adminCommand.Command))
+            {
+                return;
+            }
+
+            switch (adminCommand.Command)
+            {
+                case "register":
+                    HandleAdminRegisterCommand(adminCommand);
+                    break;
+                case "takeover":
+                    HandleAdminTakeoverCommand(adminCommand);
+                    break;
+                case "kick":
+                    HandleAdminKickCommand(adminCommand);
+                    break;
+            }
+        }
+
+        private void HandleAdminRegisterCommand(AdminCommandMessage adminCommand)
+        {
+            _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
+            if (_participantRegistry == null)
+            {
+                return;
+            }
+
+            string targetUserId = string.IsNullOrWhiteSpace(adminCommand.TargetUserId)
+                ? adminCommand.IssuedByUserId
+                : adminCommand.TargetUserId;
+
+            if (string.IsNullOrWhiteSpace(targetUserId))
+            {
+                return;
+            }
+
+            string targetDisplayName = string.IsNullOrWhiteSpace(adminCommand.TargetDisplayName)
+                ? targetUserId
+                : adminCommand.TargetDisplayName;
+
+            bool registered = _participantRegistry.TryRegisterParticipant(targetUserId, targetDisplayName, null, null, out _);
+            RefreshCommunityParticipants();
+            OnStatusMessage?.Invoke(registered
+                ? $"Admin register: {targetDisplayName} added."
+                : $"Admin register: {targetDisplayName} already registered.");
+
+            if (CurrentState == GameFlowState.WaitingForCommunityVote
+                && string.IsNullOrWhiteSpace(_activeCommunityParticipantUserId)
+                && _communityTurnParticipants.Count > 0)
+            {
+                StopAwaitParticipantsRoutine();
+                _activeCommunityParticipantIndex = -1;
+                AdvanceToNextCommunityParticipant();
+            }
+        }
+
+        private void HandleAdminTakeoverCommand(AdminCommandMessage adminCommand)
+        {
+            if (CurrentState != GameFlowState.WaitingForCommunityVote)
+            {
+                return;
+            }
+
+            _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
+            if (_participantRegistry == null || string.IsNullOrWhiteSpace(adminCommand.IssuedByUserId))
+            {
+                return;
+            }
+
+            string adminDisplayName = string.IsNullOrWhiteSpace(adminCommand.IssuedByDisplayName)
+                ? adminCommand.IssuedByUserId
+                : adminCommand.IssuedByDisplayName;
+
+            _participantRegistry.TryRegisterParticipant(adminCommand.IssuedByUserId, adminDisplayName, null, null, out _);
+            RefreshCommunityParticipants();
+
+            int takeoverIndex = _communityTurnParticipants.FindIndex(participant =>
+                IsSameUserId(participant.UserId, adminCommand.IssuedByUserId));
+
+            if (takeoverIndex < 0)
+            {
+                return;
+            }
+
+            EnsureTurnTimer()?.CancelCountdown();
+            ActivateCommunityParticipant(takeoverIndex, _participantTurnSecondsRuntime);
+            OnStatusMessage?.Invoke($"Admin takeover: {adminDisplayName} is up now.");
+        }
+
+        private void HandleAdminKickCommand(AdminCommandMessage adminCommand)
+        {
+            _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
+            if (_participantRegistry == null || string.IsNullOrWhiteSpace(adminCommand.TargetUserId))
+            {
+                return;
+            }
+
+            bool removed = _participantRegistry.RemoveParticipant(adminCommand.TargetUserId);
+            if (!removed)
+            {
+                OnStatusMessage?.Invoke($"Admin kick: {adminCommand.TargetUserId} not found.");
+                return;
+            }
+
+            string targetLabel = string.IsNullOrWhiteSpace(adminCommand.TargetDisplayName)
+                ? adminCommand.TargetUserId
+                : adminCommand.TargetDisplayName;
+            OnStatusMessage?.Invoke($"Admin kick: {targetLabel} removed.");
+        }
+
         private void EnsureParticipantExistsForChatMessage(ChatMessage chatMessage)
         {
             _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
@@ -998,85 +1154,6 @@ namespace FourWinsTikTok.Gameplay
 
             return false;
         }
-
-#if UNITY_EDITOR
-        private bool TryHandleEditorAdminCommand(ChatMessage chatMessage, string sanitizedMessage)
-        {
-            if (!IsSameUserId(chatMessage.UserId, "ichriwo"))
-            {
-                return false;
-            }
-
-            bool isRegisterCommand = string.Equals(sanitizedMessage, "/register", StringComparison.OrdinalIgnoreCase)
-                                     || string.Equals(sanitizedMessage, "/registration", StringComparison.OrdinalIgnoreCase);
-            if (isRegisterCommand)
-            {
-                _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
-                string displayName = string.IsNullOrWhiteSpace(chatMessage.DisplayName) ? chatMessage.UserId : chatMessage.DisplayName;
-                if (_participantRegistry.TryRegisterParticipant(chatMessage.UserId, displayName, chatMessage.AvatarPicture, chatMessage.AvatarUrl, out ParticipantInfo participant))
-                {
-                    if (CurrentState == GameFlowState.WaitingForCommunityVote)
-                    {
-                        _communityTurnParticipants.Add(participant);
-                    }
-
-                    OnStatusMessage?.Invoke($"Admin register: {_participantRegistry.Count} participants.");
-                }
-
-                return true;
-            }
-
-            if (string.Equals(sanitizedMessage, "/takeover", StringComparison.OrdinalIgnoreCase))
-            {
-                if (CurrentState == GameFlowState.WaitingForCommunityVote)
-                {
-                    _participantRegistry ??= ParticipantRegistryService.EnsureInstance();
-
-                    ParticipantInfo takeoverParticipant = _communityTurnParticipants.Find(participant =>
-                        IsSameUserId(participant.UserId, chatMessage.UserId));
-
-                    if (takeoverParticipant == null)
-                    {
-                        string displayName = string.IsNullOrWhiteSpace(chatMessage.DisplayName) ? chatMessage.UserId : chatMessage.DisplayName;
-                        if (_participantRegistry.TryRegisterParticipant(chatMessage.UserId, displayName, chatMessage.AvatarPicture, chatMessage.AvatarUrl, out ParticipantInfo registeredParticipant))
-                        {
-                            takeoverParticipant = registeredParticipant;
-                        }
-                        else
-                        {
-                            foreach (ParticipantInfo participant in _participantRegistry.Participants)
-                            {
-                                if (string.Equals(participant.UserId, chatMessage.UserId, StringComparison.OrdinalIgnoreCase))
-                                {
-                                    takeoverParticipant = participant;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (takeoverParticipant != null)
-                        {
-                            _communityTurnParticipants.Add(takeoverParticipant);
-                        }
-                    }
-
-                    int takeoverIndex = _communityTurnParticipants.FindIndex(participant =>
-                        IsSameUserId(participant.UserId, chatMessage.UserId));
-
-                    if (takeoverIndex >= 0)
-                    {
-                        EnsureTurnTimer()?.CancelCountdown();
-                        ActivateCommunityParticipant(takeoverIndex, _participantTurnSecondsRuntime);
-                        OnStatusMessage?.Invoke("Admin takeover: ichriwo is up now.");
-                    }
-                }
-
-                return true;
-            }
-
-            return false;
-        }
-#endif
 
         private void HandleCommunityTimerCompleted()
         {
@@ -1480,7 +1557,7 @@ namespace FourWinsTikTok.Gameplay
             ActivePlayer = PlayerSide.Streamer;
             _activeCommunityParticipantUserId = string.Empty;
             _communityTurnDeadlineRealtime = 0f;
-            float streamerDuration = Mathf.Max(0f, streamerTurnSeconds);
+            float streamerDuration = Mathf.Max(0f, _participantTurnSecondsRuntime);
             _streamerTurnDeadlineRealtime = streamerDuration > 0f
                 ? Time.realtimeSinceStartup + streamerDuration
                 : 0f;
