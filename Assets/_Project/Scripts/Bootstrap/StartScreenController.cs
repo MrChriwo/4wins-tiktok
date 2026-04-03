@@ -31,6 +31,9 @@ namespace FourWinsTikTok.Bootstrap
         private TextField _settingsGiftNameField;
         private IntegerField _settingsRegistrationSecondsField;
         private IntegerField _settingsParticipantTurnSecondsField;
+        private TextField _settingsChallengeGiftField;
+        private IntegerField _settingsChallengeCoinTargetField;
+        private IntegerField _settingsChallengeSecondsField;
         private Label _settingsHintLabel;
         private Button _settingsSaveButton;
         private Button _settingsCancelButton;
@@ -45,6 +48,9 @@ namespace FourWinsTikTok.Bootstrap
         private string _savedRegistrationGiftName = "Rose";
         private int _savedRegistrationSeconds = 20;
         private int _savedParticipantTurnSeconds = 60;
+        private string _savedChallengeGiftName = "Rose";
+        private int _savedChallengeCoinTarget = 500;
+        private int _savedChallengeSeconds = 10;
 
         private void OnEnable()
         {
@@ -82,6 +88,9 @@ namespace FourWinsTikTok.Bootstrap
             _settingsGiftNameField = root.Q<TextField>("settings-gift-field");
             _settingsRegistrationSecondsField = root.Q<IntegerField>("settings-registration-seconds-field");
             _settingsParticipantTurnSecondsField = root.Q<IntegerField>("settings-participant-turn-seconds-field");
+            _settingsChallengeGiftField = root.Q<TextField>("settings-challenge-gift-field");
+            _settingsChallengeCoinTargetField = root.Q<IntegerField>("settings-challenge-coin-target-field");
+            _settingsChallengeSecondsField = root.Q<IntegerField>("settings-challenge-seconds-field");
             _settingsHintLabel = root.Q<Label>("settings-hint-label");
             _settingsSaveButton = root.Q<Button>("settings-save-button");
             _settingsCancelButton = root.Q<Button>("settings-cancel-button");
@@ -99,6 +108,9 @@ namespace FourWinsTikTok.Bootstrap
             _savedRegistrationGiftName = PlayerPrefs.GetString(BootstrapKeys.RegistrationGiftNamePlayerPrefsKey, "Rose").Trim();
             _savedRegistrationSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.RegistrationDurationSecondsPlayerPrefsKey, 20), 5, 600);
             _savedParticipantTurnSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.ParticipantTurnDurationSecondsPlayerPrefsKey, 60), 5, 300);
+            _savedChallengeGiftName = PlayerPrefs.GetString(BootstrapKeys.BeginnerChallengeGiftNamePlayerPrefsKey, "Rose").Trim();
+            _savedChallengeCoinTarget = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.BeginnerChallengeCoinTargetPlayerPrefsKey, 500), 1, 500000);
+            _savedChallengeSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.BeginnerChallengeDurationSecondsPlayerPrefsKey, 10), 1, 120);
 
             _startButton.clicked += HandleStartClicked;
             _settingsButton.clicked += HandleSettingsClicked;
@@ -121,7 +133,8 @@ namespace FourWinsTikTok.Bootstrap
                 _settingsModal == null || _settingsUsernameField == null ||
                 _settingsCommunityDisplayField == null || _settingsStreamerDisplayField == null ||
                 _settingsRoundsField == null || _settingsGiftNameField == null || _settingsRegistrationSecondsField == null ||
-                _settingsParticipantTurnSecondsField == null ||
+                _settingsParticipantTurnSecondsField == null || _settingsChallengeGiftField == null ||
+                _settingsChallengeCoinTargetField == null || _settingsChallengeSecondsField == null ||
                 _settingsHintLabel == null || _settingsSaveButton == null || _settingsCancelButton == null)
             {
                 Debug.LogError("StartScreenController: Missing required UI elements in StartScreen UXML.");
@@ -184,6 +197,9 @@ namespace FourWinsTikTok.Bootstrap
             _settingsGiftNameField.value = _savedRegistrationGiftName;
             _settingsRegistrationSecondsField.value = _savedRegistrationSeconds;
             _settingsParticipantTurnSecondsField.value = _savedParticipantTurnSeconds;
+            _settingsChallengeGiftField.value = _savedChallengeGiftName;
+            _settingsChallengeCoinTargetField.value = _savedChallengeCoinTarget;
+            _settingsChallengeSecondsField.value = _savedChallengeSeconds;
             SetSettingsModalVisible(true, string.Empty);
         }
 
@@ -202,10 +218,19 @@ namespace FourWinsTikTok.Bootstrap
             string registrationGiftName = _settingsGiftNameField.value?.Trim();
             int registrationSeconds = Mathf.Clamp(_settingsRegistrationSecondsField.value, 5, 600);
             int participantTurnSeconds = Mathf.Clamp(_settingsParticipantTurnSecondsField.value, 5, 300);
+            string challengeGiftName = _settingsChallengeGiftField.value?.Trim();
+            int challengeCoinTarget = Mathf.Clamp(_settingsChallengeCoinTargetField.value, 1, 500000);
+            int challengeSeconds = Mathf.Clamp(_settingsChallengeSecondsField.value, 1, 120);
 
             if (string.IsNullOrWhiteSpace(registrationGiftName))
             {
                 SetSettingsModalVisible(true, "Registration gift cannot be empty.");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(challengeGiftName))
+            {
+                SetSettingsModalVisible(true, "Beginner challenge gift cannot be empty.");
                 return;
             }
 
@@ -216,6 +241,9 @@ namespace FourWinsTikTok.Bootstrap
             _savedRegistrationGiftName = registrationGiftName;
             _savedRegistrationSeconds = registrationSeconds;
             _savedParticipantTurnSeconds = participantTurnSeconds;
+            _savedChallengeGiftName = challengeGiftName;
+            _savedChallengeCoinTarget = challengeCoinTarget;
+            _savedChallengeSeconds = challengeSeconds;
             PlayerPrefs.SetString(BootstrapKeys.StreamerUsernamePlayerPrefsKey, _savedUsername);
             PlayerPrefs.SetString(BootstrapKeys.CommunityDisplayNamePlayerPrefsKey, _savedCommunityDisplayName);
             PlayerPrefs.SetString(BootstrapKeys.StreamerDisplayNamePlayerPrefsKey, _savedStreamerDisplayName);
@@ -223,6 +251,9 @@ namespace FourWinsTikTok.Bootstrap
             PlayerPrefs.SetString(BootstrapKeys.RegistrationGiftNamePlayerPrefsKey, _savedRegistrationGiftName);
             PlayerPrefs.SetInt(BootstrapKeys.RegistrationDurationSecondsPlayerPrefsKey, _savedRegistrationSeconds);
             PlayerPrefs.SetInt(BootstrapKeys.ParticipantTurnDurationSecondsPlayerPrefsKey, _savedParticipantTurnSeconds);
+            PlayerPrefs.SetString(BootstrapKeys.BeginnerChallengeGiftNamePlayerPrefsKey, _savedChallengeGiftName);
+            PlayerPrefs.SetInt(BootstrapKeys.BeginnerChallengeCoinTargetPlayerPrefsKey, _savedChallengeCoinTarget);
+            PlayerPrefs.SetInt(BootstrapKeys.BeginnerChallengeDurationSecondsPlayerPrefsKey, _savedChallengeSeconds);
             PlayerPrefs.Save();
 
             SetSettingsModalVisible(false, string.Empty);
@@ -358,6 +389,9 @@ namespace FourWinsTikTok.Bootstrap
             _settingsGiftNameField.SetEnabled(interactable);
             _settingsRegistrationSecondsField.SetEnabled(interactable);
             _settingsParticipantTurnSecondsField.SetEnabled(interactable);
+            _settingsChallengeGiftField.SetEnabled(interactable);
+            _settingsChallengeCoinTargetField.SetEnabled(interactable);
+            _settingsChallengeSecondsField.SetEnabled(interactable);
         }
 
         private void SetSettingsModalVisible(bool visible, string hint)

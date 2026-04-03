@@ -26,6 +26,9 @@
                 <ui:IntegerField name="settings-rounds-field" label="Rounds to Win" value="5" class="settings-input" />
                 <ui:TextField name="settings-gift-field" label="Registration Gift" value="Rose" class="settings-input" />
                 <ui:IntegerField name="settings-registration-seconds-field" label="Registration Time (sec)" value="20" class="settings-input" />
+                <ui:TextField name="settings-challenge-gift-field" label="Beginner Challenge Gift" value="Rose" class="settings-input" />
+                <ui:IntegerField name="settings-challenge-coin-target-field" label="Beginner Challenge Coin Target" value="500" class="settings-input" />
+                <ui:IntegerField name="settings-challenge-seconds-field" label="Beginner Challenge Time (sec)" value="10" class="settings-input" />
                 <ui:IntegerField name="settings-participant-turn-seconds-field" label="Player Turn Time (sec)" value="60" class="settings-input" />
                 <ui:Label name="settings-hint-label" class="settings-hint" text="" />
 

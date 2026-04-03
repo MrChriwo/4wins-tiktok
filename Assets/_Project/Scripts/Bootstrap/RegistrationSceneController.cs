@@ -17,6 +17,11 @@ namespace FourWinsTikTok.Bootstrap
         [SerializeField] private TikTokLiveChatAdapter tikTokAdapter;
         [SerializeField] private string gameplaySceneName = "Game";
 
+        [Header("Challenge VFX")]
+        [SerializeField] private GameObject challengePodWorldPrefab;
+        [SerializeField] private Vector2 challengePodViewportPosition = new Vector2(0.5f, 0.56f);
+        [SerializeField, Min(1f)] private float challengePodWorldDistance = 6f;
+
         private Label _giftLabel;
         private Label _timerLabel;
         private Label _statusLabel;
@@ -25,18 +30,34 @@ namespace FourWinsTikTok.Bootstrap
 
         private string _requiredGiftName;
         private float _remainingSeconds;
+        private string _beginnerChallengeGiftName;
+        private int _beginnerChallengeCoinTarget;
+        private float _beginnerChallengeDurationSeconds;
+        private bool _beginnerChallengeActive;
+        private int _beginnerChallengeAccumulatedCoins;
         private ParticipantRegistryService _registry;
         private AsyncOperation _preloadGameOperation;
         private bool _countdownFinished;
         private bool _isStartingGame;
         private bool _registrationClosed;
+        private bool _challengeStarted;
+        private bool _challengeFinished;
         private readonly List<TikTokLiveChatAdapter> _subscribedAdapters = new List<TikTokLiveChatAdapter>();
         private float _nextAdapterResolveAt;
         private VisualElement _participantsGrid;
         private VisualElement _activeRegistrationColumn;
         private int _activeRegistrationColumnCount;
+        private VisualElement _challengePodRoot;
+        private Label _challengePodCountLabel;
+        private Label _challengePodPercentLabel;
+        private bool _challengeExplosionPlayed;
+        private GameObject _challengeExplosionObject;
+        private GameObject _challengePodWorldObject;
+        private ParticleSystem _challengePodAmbientParticles;
 
         private const int ParticipantsPerColumn = 4;
+        private const string StartingSideCommunity = "community";
+        private const string StartingSideStreamer = "streamer";
 
         private void OnEnable()
         {
@@ -69,6 +90,14 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             _remainingSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.RegistrationDurationSecondsPlayerPrefsKey, 20), 5, 600);
+            _beginnerChallengeGiftName = PlayerPrefs.GetString(BootstrapKeys.BeginnerChallengeGiftNamePlayerPrefsKey, "Rose").Trim();
+            if (string.IsNullOrWhiteSpace(_beginnerChallengeGiftName))
+            {
+                _beginnerChallengeGiftName = "Rose";
+            }
+
+            _beginnerChallengeCoinTarget = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.BeginnerChallengeCoinTargetPlayerPrefsKey, 500), 1, 500000);
+            _beginnerChallengeDurationSeconds = Mathf.Clamp(PlayerPrefs.GetInt(BootstrapKeys.BeginnerChallengeDurationSecondsPlayerPrefsKey, 10), 1, 120);
 
             VisualElement root = uiDocument.rootVisualElement;
             _giftLabel = root.Q<Label>("gift-label");
@@ -84,6 +113,8 @@ namespace FourWinsTikTok.Bootstrap
                 return;
             }
 
+            SpawnChallengePod(root);
+
             _giftLabel.text = $"Send gift to register: {_requiredGiftName}";
             _statusLabel.text = "Waiting for participants...";
             _startGameButton.style.display = DisplayStyle.None;
@@ -91,6 +122,14 @@ namespace FourWinsTikTok.Bootstrap
             _countdownFinished = false;
             _isStartingGame = false;
             _registrationClosed = false;
+            _challengeStarted = false;
+            _challengeFinished = false;
+            _beginnerChallengeActive = false;
+            _beginnerChallengeAccumulatedCoins = 0;
+            _challengeExplosionPlayed = false;
+            SetChallengePodVisible(false);
+            UpdateChallengePodVisuals();
+            SetChallengeFocusMode(false);
             _nextAdapterResolveAt = Time.unscaledTime;
             BuildParticipantsGrid();
 
@@ -117,11 +156,13 @@ namespace FourWinsTikTok.Bootstrap
         {
             if (Time.unscaledTime < _nextAdapterResolveAt)
             {
+                UpdateChallengeWorldObjectTransform();
                 return;
             }
 
             _nextAdapterResolveAt = Time.unscaledTime + 1f;
             EnsureAdapterSubscription();
+            UpdateChallengeWorldObjectTransform();
         }
 
         private void OnDisable()
@@ -137,6 +178,19 @@ namespace FourWinsTikTok.Bootstrap
             if (_startGameButton != null)
             {
                 _startGameButton.clicked -= HandleStartGameClicked;
+            }
+
+            if (_challengeExplosionObject != null)
+            {
+                Destroy(_challengeExplosionObject);
+                _challengeExplosionObject = null;
+            }
+
+            if (_challengePodWorldObject != null)
+            {
+                Destroy(_challengePodWorldObject);
+                _challengePodWorldObject = null;
+                _challengePodAmbientParticles = null;
             }
         }
 
@@ -244,7 +298,7 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             adapter.OnGiftReceived -= HandleGiftReceived;
-                adapter.OnAdminCommandReceived -= HandleAdminCommandReceived;
+            adapter.OnAdminCommandReceived -= HandleAdminCommandReceived;
 #if UNITY_EDITOR
             adapter.OnChatMessageReceived -= HandleChatMessage;
 #endif
@@ -266,12 +320,64 @@ namespace FourWinsTikTok.Bootstrap
             }
 
             _timerLabel.text = "0";
-            _countdownFinished = true;
             _registrationClosed = true;
-            _statusLabel.text = "Registration finished. Press Start Game.";
+            Debug.Log($"RegistrationSceneController: Registration closed. Participants={_registry.Count}.");
+
+            _statusLabel.text = "Registration abgeschlossen. Starte jetzt die Beginner Challenge.";
+            _startGameButton.text = "Start Beginner Challenge";
             _startGameButton.style.display = DisplayStyle.Flex;
             _startGameButton.SetEnabled(true);
-            Debug.Log($"RegistrationSceneController: Registration closed. Participants={_registry.Count}.");
+            _countdownFinished = true;
+            yield break;
+        }
+
+        private IEnumerator BeginnerChallengeRoutine()
+        {
+            if (_challengeStarted)
+            {
+                yield break;
+            }
+
+            _challengeStarted = true;
+            _challengeFinished = false;
+            _beginnerChallengeActive = true;
+            _beginnerChallengeAccumulatedCoins = 0;
+            _challengeExplosionPlayed = false;
+            SetChallengePodVisible(true);
+            SetChallengeFocusMode(true);
+            EnsureChallengeWorldObject();
+            UpdateChallengePodVisuals();
+            _startGameButton.style.display = DisplayStyle.None;
+            _startGameButton.SetEnabled(false);
+
+            _giftLabel.text = $"Beginner Challenge: {_beginnerChallengeGiftName} ({_beginnerChallengeCoinTarget} coins in {Mathf.RoundToInt(_beginnerChallengeDurationSeconds)}s)";
+            _statusLabel.text = $"Community challenge started: 0 / {_beginnerChallengeCoinTarget} coins.";
+
+            float remaining = _beginnerChallengeDurationSeconds;
+            while (remaining > 0f)
+            {
+                _timerLabel.text = Mathf.CeilToInt(remaining).ToString();
+                remaining -= Time.deltaTime;
+                yield return null;
+            }
+
+            _timerLabel.text = "0";
+            _beginnerChallengeActive = false;
+            _challengeFinished = true;
+            UpdateChallengePodVisuals();
+
+            bool communityStarts = _beginnerChallengeAccumulatedCoins >= _beginnerChallengeCoinTarget;
+            string startingSide = communityStarts ? StartingSideCommunity : StartingSideStreamer;
+            PlayerPrefs.SetString(BootstrapKeys.MatchStartingSidePlayerPrefsKey, startingSide);
+            PlayerPrefs.Save();
+
+            _startGameButton.text = "Start Game";
+            _startGameButton.style.display = DisplayStyle.Flex;
+            _startGameButton.SetEnabled(true);
+
+            _statusLabel.text = communityStarts
+                ? $"Challenge won ({_beginnerChallengeAccumulatedCoins}/{_beginnerChallengeCoinTarget}). Community starts. Press Start Game."
+                : $"Challenge failed ({_beginnerChallengeAccumulatedCoins}/{_beginnerChallengeCoinTarget}). Streamer starts. Press Start Game.";
         }
 
         private void HandleStartGameClicked()
@@ -279,6 +385,24 @@ namespace FourWinsTikTok.Bootstrap
             if (_isStartingGame || !_countdownFinished)
             {
                 return;
+            }
+
+            if (_registrationClosed && !_challengeStarted)
+            {
+                StartCoroutine(BeginnerChallengeRoutine());
+                return;
+            }
+
+            if (!_challengeFinished)
+            {
+                return;
+            }
+
+            if (_challengePodWorldObject != null)
+            {
+                Destroy(_challengePodWorldObject);
+                _challengePodWorldObject = null;
+                _challengePodAmbientParticles = null;
             }
 
             StartCoroutine(StartGameRoutine());
@@ -312,16 +436,31 @@ namespace FourWinsTikTok.Bootstrap
         {
             Debug.Log($"RegistrationSceneController: Gift event user='{giftMessage.UserId}', gift='{giftMessage.GiftName}', closed={_registrationClosed}, remaining={_remainingSeconds:0.0}s.");
 
-            if (_registrationClosed)
-            {
-                Debug.Log($"RegistrationSceneController: Ignored gift from '{giftMessage.UserId}' because registration is closed.");
-                return;
-            }
-
             string receivedGiftName = giftMessage.GiftName?.Trim();
             if (string.IsNullOrWhiteSpace(receivedGiftName))
             {
                 Debug.Log("RegistrationSceneController: Ignored gift event because gift name is empty.");
+                return;
+            }
+
+            if (_registrationClosed)
+            {
+                if (!_beginnerChallengeActive)
+                {
+                    Debug.Log($"RegistrationSceneController: Ignored gift from '{giftMessage.UserId}' because registration and challenge are closed.");
+                    return;
+                }
+
+                if (!IsGiftMatchForChallenge(receivedGiftName))
+                {
+                    return;
+                }
+
+                int coinsToAdd = Mathf.Max(1, giftMessage.GiftCoins);
+                _beginnerChallengeAccumulatedCoins += coinsToAdd;
+                _statusLabel.text = $"Community challenge: {_beginnerChallengeAccumulatedCoins} / {_beginnerChallengeCoinTarget} coins.";
+                UpdateChallengePodVisuals();
+                Debug.Log($"RegistrationSceneController: Challenge progress +{coinsToAdd} by '{giftMessage.UserId}'. Total={_beginnerChallengeAccumulatedCoins}/{_beginnerChallengeCoinTarget}");
                 return;
             }
 
@@ -340,6 +479,25 @@ namespace FourWinsTikTok.Bootstrap
             {
                 Debug.Log($"RegistrationSceneController: Gift matched but participant '{giftMessage.UserId}' was already registered.");
             }
+        }
+
+        private bool IsGiftMatchForChallenge(string receivedGiftName)
+        {
+            string requiredNormalized = NormalizeGiftName(_beginnerChallengeGiftName);
+            string receivedNormalized = NormalizeGiftName(receivedGiftName);
+
+            if (string.IsNullOrWhiteSpace(requiredNormalized) || string.IsNullOrWhiteSpace(receivedNormalized))
+            {
+                return false;
+            }
+
+            if (string.Equals(requiredNormalized, receivedNormalized, System.StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return receivedNormalized.Contains(requiredNormalized, System.StringComparison.OrdinalIgnoreCase)
+                   || requiredNormalized.Contains(receivedNormalized, System.StringComparison.OrdinalIgnoreCase);
         }
 
         private void HandleAdminCommandReceived(AdminCommandMessage adminCommand)
@@ -548,6 +706,252 @@ namespace FourWinsTikTok.Bootstrap
 
             _activeRegistrationColumn = null;
             _activeRegistrationColumnCount = 0;
+        }
+
+        private void SpawnChallengePod(VisualElement root)
+        {
+            if (root == null || _challengePodRoot != null)
+            {
+                return;
+            }
+
+            _challengePodRoot = new VisualElement();
+            _challengePodRoot.name = "challenge-pod-root";
+            _challengePodRoot.AddToClassList("challenge-pod-root");
+            _challengePodRoot.pickingMode = PickingMode.Ignore;
+
+            _challengePodCountLabel = new Label("0 / 0");
+            _challengePodCountLabel.AddToClassList("challenge-pod-count");
+            _challengePodCountLabel.pickingMode = PickingMode.Ignore;
+            _challengePodRoot.Add(_challengePodCountLabel);
+
+            _challengePodPercentLabel = new Label("0%");
+            _challengePodPercentLabel.AddToClassList("challenge-pod-percent");
+            _challengePodPercentLabel.pickingMode = PickingMode.Ignore;
+            _challengePodRoot.Add(_challengePodPercentLabel);
+            root.Add(_challengePodRoot);
+        }
+
+        private void SetChallengePodVisible(bool isVisible)
+        {
+            if (_challengePodRoot == null)
+            {
+                return;
+            }
+
+            _challengePodRoot.style.display = isVisible ? DisplayStyle.Flex : DisplayStyle.None;
+        }
+
+        private void SetChallengeFocusMode(bool isActive)
+        {
+            if (_participantsScroll != null)
+            {
+                _participantsScroll.style.display = isActive ? DisplayStyle.None : DisplayStyle.Flex;
+            }
+        }
+
+        private void UpdateChallengePodVisuals()
+        {
+            if (_challengePodCountLabel == null || _challengePodPercentLabel == null)
+            {
+                return;
+            }
+
+            int currentCoins = Mathf.Max(0, _beginnerChallengeAccumulatedCoins);
+            int targetCoins = Mathf.Max(1, _beginnerChallengeCoinTarget);
+            float progress = Mathf.Clamp01((float)currentCoins / targetCoins);
+
+            _challengePodCountLabel.text = $"{currentCoins} / {targetCoins}";
+            _challengePodPercentLabel.text = $"{Mathf.RoundToInt(progress * 100f)}%";
+
+            if (progress >= 1f)
+            {
+                TriggerChallengeCoinExplosion();
+            }
+        }
+
+        private void TriggerChallengeCoinExplosion()
+        {
+            if (_challengeExplosionPlayed)
+            {
+                return;
+            }
+
+            _challengeExplosionPlayed = true;
+
+            if (_challengeExplosionObject != null)
+            {
+                Destroy(_challengeExplosionObject);
+                _challengeExplosionObject = null;
+            }
+
+            _challengeExplosionObject = new GameObject("ChallengeCoinExplosion");
+            Camera mainCamera = Camera.main;
+            if (mainCamera != null)
+            {
+                if (_challengePodWorldObject != null)
+                {
+                    _challengeExplosionObject.transform.position = _challengePodWorldObject.transform.position;
+                }
+                else
+                {
+                    float zDistance = Mathf.Max(2.5f, challengePodWorldDistance);
+                    _challengeExplosionObject.transform.position = mainCamera.ViewportToWorldPoint(new Vector3(challengePodViewportPosition.x, challengePodViewportPosition.y, zDistance));
+                }
+            }
+
+            ParticleSystem particleSystem = _challengeExplosionObject.AddComponent<ParticleSystem>();
+            var main = particleSystem.main;
+            main.duration = 1.2f;
+            main.loop = false;
+            main.playOnAwake = false;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.6f, 1.4f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(4.2f, 9.5f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.12f, 0.34f);
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(1f, 0.28f, 0.12f, 1f),
+                new Color(1f, 0.58f, 0.14f, 1f));
+            main.gravityModifier = 0.55f;
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+            main.maxParticles = 600;
+
+            var emission = particleSystem.emission;
+            emission.rateOverTime = 0f;
+            emission.SetBursts(new[]
+            {
+                new ParticleSystem.Burst(0f, 180),
+                new ParticleSystem.Burst(0.06f, 120),
+                new ParticleSystem.Burst(0.14f, 90)
+            });
+
+            var shape = particleSystem.shape;
+            shape.enabled = true;
+            shape.shapeType = ParticleSystemShapeType.Sphere;
+            shape.radius = 0.18f;
+
+            var noise = particleSystem.noise;
+            noise.enabled = true;
+            noise.strength = 0.9f;
+            noise.frequency = 0.75f;
+
+            var colorOverLifetime = particleSystem.colorOverLifetime;
+            colorOverLifetime.enabled = true;
+            Gradient gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(new Color(1f, 0.22f, 0.12f), 0f),
+                    new GradientColorKey(new Color(1f, 0.46f, 0.08f), 0.55f),
+                    new GradientColorKey(new Color(0.72f, 0.08f, 0.06f), 1f)
+                },
+                new[]
+                {
+                    new GradientAlphaKey(0.95f, 0f),
+                    new GradientAlphaKey(0.85f, 0.45f),
+                    new GradientAlphaKey(0f, 1f)
+                });
+            colorOverLifetime.color = new ParticleSystem.MinMaxGradient(gradient);
+
+            var renderer = particleSystem.GetComponent<ParticleSystemRenderer>();
+            renderer.renderMode = ParticleSystemRenderMode.Billboard;
+
+            particleSystem.Play();
+            Destroy(_challengeExplosionObject, 2f);
+        }
+
+        private void EnsureChallengeWorldObject()
+        {
+            if (_challengePodWorldObject != null)
+            {
+                return;
+            }
+
+            if (challengePodWorldPrefab != null)
+            {
+                _challengePodWorldObject = Instantiate(challengePodWorldPrefab);
+                _challengePodWorldObject.name = "ChallengePodWorldObject";
+                _challengePodAmbientParticles = _challengePodWorldObject.GetComponentInChildren<ParticleSystem>();
+                UpdateChallengeWorldObjectTransform();
+                return;
+            }
+
+            _challengePodWorldObject = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            _challengePodWorldObject.name = "ChallengePodWorldObject";
+            _challengePodWorldObject.transform.localScale = new Vector3(0.8f, 0.08f, 0.8f);
+
+            Renderer renderer = _challengePodWorldObject.GetComponent<Renderer>();
+            if (renderer != null)
+            {
+                Material material = new Material(Shader.Find("Universal Render Pipeline/Lit"));
+                material.color = new Color(0.95f, 0.58f, 0.2f, 1f);
+                material.EnableKeyword("_EMISSION");
+                material.SetColor("_EmissionColor", new Color(1f, 0.62f, 0.15f, 0.85f));
+                renderer.sharedMaterial = material;
+            }
+
+            Collider collider = _challengePodWorldObject.GetComponent<Collider>();
+            if (collider != null)
+            {
+                Destroy(collider);
+            }
+
+            GameObject particlesObject = new GameObject("ChallengePodAmbientParticles");
+            particlesObject.transform.SetParent(_challengePodWorldObject.transform, false);
+            particlesObject.transform.localPosition = Vector3.zero;
+            _challengePodAmbientParticles = particlesObject.AddComponent<ParticleSystem>();
+
+            var main = _challengePodAmbientParticles.main;
+            main.duration = 2f;
+            main.loop = true;
+            main.playOnAwake = true;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(0.6f, 1.35f);
+            main.startSpeed = new ParticleSystem.MinMaxCurve(0.4f, 1.4f);
+            main.startSize = new ParticleSystem.MinMaxCurve(0.04f, 0.11f);
+            main.startColor = new ParticleSystem.MinMaxGradient(
+                new Color(1f, 0.2f, 0.08f, 0.75f),
+                new Color(1f, 0.48f, 0.1f, 0.92f));
+            main.simulationSpace = ParticleSystemSimulationSpace.World;
+
+            var emission = _challengePodAmbientParticles.emission;
+            emission.rateOverTime = 36f;
+
+            var shape = _challengePodAmbientParticles.shape;
+            shape.enabled = true;
+            shape.shapeType = ParticleSystemShapeType.Circle;
+            shape.radius = 0.72f;
+            shape.arc = 360f;
+
+            var velocityOverLifetime = _challengePodAmbientParticles.velocityOverLifetime;
+            velocityOverLifetime.enabled = true;
+            velocityOverLifetime.space = ParticleSystemSimulationSpace.Local;
+            velocityOverLifetime.x = new ParticleSystem.MinMaxCurve(0f, 0f);
+            velocityOverLifetime.y = new ParticleSystem.MinMaxCurve(-1.3f, -0.35f);
+            velocityOverLifetime.z = new ParticleSystem.MinMaxCurve(0f, 0f);
+
+            UpdateChallengeWorldObjectTransform();
+        }
+
+        private void UpdateChallengeWorldObjectTransform()
+        {
+            if (_challengePodWorldObject == null)
+            {
+                return;
+            }
+
+            Camera mainCamera = Camera.main;
+            if (mainCamera == null)
+            {
+                return;
+            }
+
+            float zDistance = Mathf.Max(2.5f, challengePodWorldDistance);
+            Vector3 worldPosition = mainCamera.ViewportToWorldPoint(new Vector3(
+                Mathf.Clamp01(challengePodViewportPosition.x),
+                Mathf.Clamp01(challengePodViewportPosition.y),
+                zDistance));
+
+            _challengePodWorldObject.transform.position = worldPosition;
+            _challengePodWorldObject.transform.rotation = mainCamera.transform.rotation;
         }
 
         private IEnumerator LoadAvatarFromUrlRoutine(VisualElement avatarElement, string avatarUrl)

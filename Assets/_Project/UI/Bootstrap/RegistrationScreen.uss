@@ -53,6 +53,32 @@
     height: 68%;
 }
 
+.challenge-pod-root {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 170px;
+    height: 180px;
+    align-items: center;
+    justify-content: center;
+    display: none;
+}
+
+.challenge-pod-count {
+    font-size: 34px;
+    -unity-font-style: bold;
+    color: rgb(255, 230, 220);
+    -unity-text-align: middle-center;
+    margin-bottom: 8px;
+}
+
+.challenge-pod-percent {
+    font-size: 52px;
+    -unity-font-style: bold;
+    color: rgb(255, 196, 176);
+    -unity-text-align: middle-center;
+}
+
 .participants-grid {
     width: 100%;
     flex-direction: row-reverse;

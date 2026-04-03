@@ -138,6 +138,27 @@ function collectUserAliases(payload) {
   return aliases;
 }
 
+function extractGiftCoins(data) {
+  const diamondCount = Number(
+    data?.diamondCount ||
+    data?.gift?.diamondCount ||
+    data?.giftDetails?.diamondCount ||
+    data?.gift?.diamond ||
+    1
+  );
+
+  const repeatCount = Number(
+    data?.repeatCount ||
+    data?.count ||
+    data?.giftCount ||
+    data?.comboCount ||
+    1
+  );
+
+  const total = Math.max(1, Math.trunc(diamondCount)) * Math.max(1, Math.trunc(repeatCount));
+  return Number.isFinite(total) && total > 0 ? total : 1;
+}
+
 export async function connectTikTokSession({ session, store, logger, registrationGiftName, adminStore }) {
   store.resetSessionLifecycle?.(session);
 
@@ -252,6 +273,7 @@ export async function connectTikTokSession({ session, store, logger, registratio
     ).trim();
 
     const resolvedGiftName = giftName || (giftId ? `gift-${giftId}` : "");
+    const giftCoins = extractGiftCoins(data);
 
     if (!resolvedGiftName || aliases.size === 0) {
       return;
@@ -259,22 +281,21 @@ export async function connectTikTokSession({ session, store, logger, registratio
 
     const requiredGiftNormalized = session.registrationGiftNameNormalized || "rose";
     const giftMatchesRegistration = isRegistrationGiftMatch(requiredGiftNormalized, resolvedGiftName);
-    if (!giftMatchesRegistration) {
-      return;
-    }
-
-    const wasRegistered = Array.from(aliases).some(alias => session.registeredUsers?.has(alias));
-    if (!session.registeredUsers) {
-      session.registeredUsers = new Set();
-    }
-
-    for (const alias of aliases) {
-      session.registeredUsers.add(alias);
-    }
-
     const primaryUserId = normalizedUserId || Array.from(aliases)[0];
-    if (!wasRegistered) {
-      logger.info(`user ${primaryUserId} registered for event`);
+
+    if (giftMatchesRegistration) {
+      const wasRegistered = Array.from(aliases).some(alias => session.registeredUsers?.has(alias));
+      if (!session.registeredUsers) {
+        session.registeredUsers = new Set();
+      }
+
+      for (const alias of aliases) {
+        session.registeredUsers.add(alias);
+      }
+
+      if (!wasRegistered) {
+        logger.info(`user ${primaryUserId} registered for event`);
+      }
     }
 
     store.appendEvent(session, {
@@ -282,6 +303,7 @@ export async function connectTikTokSession({ session, store, logger, registratio
       userId: primaryUserId,
       displayName,
       giftName: resolvedGiftName,
+      giftCoins,
       avatarUrl
     });
   });

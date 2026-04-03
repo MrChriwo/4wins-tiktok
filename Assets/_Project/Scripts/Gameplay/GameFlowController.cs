@@ -68,6 +68,7 @@ namespace FourWinsTikTok.Gameplay
         private float _lastHandledCommunityTimeoutRealtime = -10f;
         private bool _isPaused;
         private float _pausedRemainingSeconds;
+        private PlayerSide _configuredStartingSide = PlayerSide.Community;
 
         public BoardState CurrentBoard { get; private set; }
         public GameFlowState CurrentState { get; private set; } = GameFlowState.Idle;
@@ -394,6 +395,7 @@ namespace FourWinsTikTok.Gameplay
                 PlayerPrefs.GetInt(BootstrapKeys.ParticipantTurnDurationSecondsPlayerPrefsKey, Mathf.RoundToInt(communityParticipantTurnSeconds)),
                 5,
                 300);
+            _configuredStartingSide = ResolveConfiguredStartingSide();
 
             _currentRound = 1;
             _communityWins = 0;
@@ -413,7 +415,7 @@ namespace FourWinsTikTok.Gameplay
             InitializeBoardForRound();
             PublishScoreState();
 
-            BeginCommunityTurn();
+            BeginConfiguredStartingTurn();
         }
 
         public void StartNextRound()
@@ -447,6 +449,28 @@ namespace FourWinsTikTok.Gameplay
 
             InitializeBoardForRound();
             PublishScoreState();
+
+            BeginConfiguredStartingTurn();
+        }
+
+        private PlayerSide ResolveConfiguredStartingSide()
+        {
+            string configuredValue = PlayerPrefs.GetString(BootstrapKeys.MatchStartingSidePlayerPrefsKey, "community");
+            if (string.Equals(configuredValue, "streamer", StringComparison.OrdinalIgnoreCase))
+            {
+                return PlayerSide.Streamer;
+            }
+
+            return PlayerSide.Community;
+        }
+
+        private void BeginConfiguredStartingTurn()
+        {
+            if (_configuredStartingSide == PlayerSide.Streamer)
+            {
+                BeginStreamerTurn();
+                return;
+            }
 
             BeginCommunityTurn();
         }

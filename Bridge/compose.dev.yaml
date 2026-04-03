@@ -17,5 +17,5 @@ services:
       - BRIDGE_ADMIN_ASSIGNMENTS=jonasderksen.musik=ichriwo
       - BRIDGE_GLOBAL_ADMIN_USERNAMES=ichriwo
     volumes:
-      - ./data:/app/data
+      - ./data:/app/data:Z
     restart: unless-stopped

@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Reflection;
 using System.Text;
 using FourWinsTikTok.Bootstrap;
 using FourWinsTikTok.Config;
@@ -23,6 +24,7 @@ namespace FourWinsTikTok.TikTok
         [SerializeField] private bool useBridgeInWebGL = true;
         [SerializeField] private bool useBridgeInEditorForTesting;
         [SerializeField] private string bridgeBaseUrl = "http://localhost:3010";
+        [SerializeField] private string editorBridgeBaseUrlOverride = "http://localhost:3010";
         [SerializeField, Min(0.1f)] private float bridgePollIntervalSeconds = 0.75f;
         [SerializeField, Min(1f)] private float bridgeRequestTimeoutSeconds = 10f;
         [SerializeField] private bool bridgeAutoReconnect = true;
@@ -401,17 +403,93 @@ namespace FourWinsTikTok.TikTok
             }
 
             string normalizedGiftName = giftName.Trim();
+            int giftCoins = ResolveDirectGiftCoins(gift);
             if (logGiftMessages)
             {
-                LogInfo($"[DIRECT][GIFT] user='{userId}', gift='{normalizedGiftName}'");
+                LogInfo($"[DIRECT][GIFT] user='{userId}', gift='{normalizedGiftName}', coins={giftCoins}");
             }
 
             OnGiftReceived?.Invoke(new GiftMessage(
                 userId,
                 gift.Sender.UniqueId,
                 normalizedGiftName,
+                giftCoins,
                 gift.Sender.AvatarThumbnail,
                 null));
+        }
+
+        private static int ResolveDirectGiftCoins(TikTokGift gift)
+        {
+            if (gift == null)
+            {
+                return 1;
+            }
+
+            int repeatCount = TryReadIntProperty(gift, "RepeatCount");
+            if (repeatCount <= 0)
+            {
+                repeatCount = TryReadIntProperty(gift, "Count");
+            }
+
+            object giftDetails = TryReadProperty(gift, "Gift");
+            int diamondCount = TryReadIntProperty(giftDetails, "DiamondCount");
+            if (diamondCount <= 0)
+            {
+                diamondCount = TryReadIntProperty(gift, "DiamondCount");
+            }
+
+            if (repeatCount <= 0)
+            {
+                repeatCount = 1;
+            }
+
+            if (diamondCount <= 0)
+            {
+                diamondCount = 1;
+            }
+
+            return Mathf.Max(1, repeatCount * diamondCount);
+        }
+
+        private static object TryReadProperty(object source, string propertyName)
+        {
+            if (source == null || string.IsNullOrWhiteSpace(propertyName))
+            {
+                return null;
+            }
+
+            PropertyInfo property = source.GetType().GetProperty(propertyName, BindingFlags.Instance | BindingFlags.Public);
+            if (property == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                return property.GetValue(source);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        private static int TryReadIntProperty(object source, string propertyName)
+        {
+            object value = TryReadProperty(source, propertyName);
+            if (value == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private bool ShouldUseBridgeRuntime()
@@ -442,7 +520,7 @@ namespace FourWinsTikTok.TikTok
             StopBridgePolling(false);
             _bridgeHostId = normalizedHostId;
             _manualBridgeDisconnect = false;
-            LogInfo($"Starting bridge polling. host='{_bridgeHostId}', baseUrl='{bridgeBaseUrl}', pollInterval={bridgePollIntervalSeconds}s");
+            LogInfo($"Starting bridge polling. host='{_bridgeHostId}', baseUrl='{GetEffectiveBridgeBaseUrl()}', pollInterval={bridgePollIntervalSeconds}s");
             _bridgePollRoutine = StartCoroutine(BridgePollingRoutine());
         }
 
@@ -471,7 +549,7 @@ namespace FourWinsTikTok.TikTok
 
         private IEnumerator BridgePollingRoutine()
         {
-            if (string.IsNullOrWhiteSpace(bridgeBaseUrl))
+            if (string.IsNullOrWhiteSpace(GetEffectiveBridgeBaseUrl()))
             {
                 LogWarning("Bridge mode enabled but Bridge Base Url is empty.");
                 OnConnectionStateChanged?.Invoke(false, "bridge-url-missing");
@@ -552,7 +630,7 @@ namespace FourWinsTikTok.TikTok
 
         private IEnumerator NotifyBridgeDisconnectRoutine(string hostId)
         {
-            if (string.IsNullOrWhiteSpace(bridgeBaseUrl) || string.IsNullOrWhiteSpace(hostId))
+            if (string.IsNullOrWhiteSpace(GetEffectiveBridgeBaseUrl()) || string.IsNullOrWhiteSpace(hostId))
             {
                 yield break;
             }
@@ -670,6 +748,7 @@ namespace FourWinsTikTok.TikTok
                             bridgeEvent.userId,
                             displayName,
                             normalizedGiftName,
+                            Mathf.Max(1, bridgeEvent.giftCoins),
                             null,
                             avatarUrl));
                         break;
@@ -708,7 +787,7 @@ namespace FourWinsTikTok.TikTok
 
         private string BuildBridgeUrl(string endpoint, string hostId, long afterCursor)
         {
-            string baseUrl = bridgeBaseUrl.TrimEnd('/');
+            string baseUrl = GetEffectiveBridgeBaseUrl().TrimEnd('/');
             if (string.Equals(endpoint, "events", StringComparison.OrdinalIgnoreCase))
             {
                 return $"{baseUrl}/bridge/{endpoint}?hostId={UnityWebRequest.EscapeURL(hostId)}&after={afterCursor}";
@@ -730,7 +809,8 @@ namespace FourWinsTikTok.TikTok
             }
 
             string trimmed = rawAvatarUrl.Trim();
-            if (!ShouldUseBridgeRuntime() || string.IsNullOrWhiteSpace(bridgeBaseUrl))
+            string effectiveBridgeBaseUrl = GetEffectiveBridgeBaseUrl();
+            if (!ShouldUseBridgeRuntime() || string.IsNullOrWhiteSpace(effectiveBridgeBaseUrl))
             {
                 return trimmed;
             }
@@ -740,9 +820,27 @@ namespace FourWinsTikTok.TikTok
                 return trimmed;
             }
 
-            string baseUrl = bridgeBaseUrl.TrimEnd('/');
+            string baseUrl = effectiveBridgeBaseUrl.TrimEnd('/');
             string encodedAvatarUrl = UnityWebRequest.EscapeURL(trimmed);
             return $"{baseUrl}/bridge/avatar?url={encodedAvatarUrl}";
+        }
+
+        private string GetEffectiveBridgeBaseUrl()
+        {
+#if UNITY_EDITOR
+            if (useBridgeInEditorForTesting)
+            {
+                string editorOverride = editorBridgeBaseUrlOverride?.Trim();
+                if (!string.IsNullOrWhiteSpace(editorOverride))
+                {
+                    return editorOverride;
+                }
+
+                return "http://localhost:3010";
+            }
+#endif
+
+            return bridgeBaseUrl?.Trim();
         }
 
         private static UnityWebRequest BuildJsonPostRequest(string url, object payload)
@@ -818,6 +916,7 @@ namespace FourWinsTikTok.TikTok
             public string displayName;
             public string message;
             public string giftName;
+            public int giftCoins;
             public string avatarUrl;
             public string targetUserId;
             public string targetDisplayName;

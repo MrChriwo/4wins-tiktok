@@ -245,16 +245,18 @@ export function createBridgeRouter({ store, logger, config, adminStore }) {
       const userId = String(req.body?.userId || "debug-user").trim();
       const displayName = String(req.body?.displayName || userId).trim();
       const giftName = String(req.body?.giftName || "Rose").trim();
+      const giftCoins = Math.max(1, Number(req.body?.giftCoins || 1));
 
       store.appendEvent(session, {
         type: "gift",
         userId,
         displayName,
         giftName,
+        giftCoins,
         avatarUrl: ""
       });
 
-      return res.json({ ok: true, injectedType: "gift", giftName });
+      return res.json({ ok: true, injectedType: "gift", giftName, giftCoins });
     }
 
     if (type === "chat") {
